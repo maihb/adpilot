@@ -68,11 +68,13 @@
 |---|---|
 | ruff / format / mypy / pytest 四道门禁 | `.github/workflows/ci.yml`；改过 `.py` 或 `.md` 时 [`.claude/stop-hook.sh`](.claude/stop-hook.sh) 在本地先跑一遍 |
 | 刚写完的文件保持格式 | [`.claude/format-hook.sh`](.claude/format-hook.sh) 就地跑 `ruff format`。**`.md` 也在内** —— ruff 连 Markdown 里的 Python 代码块一起格式化，漏了它同样让 CI 红 |
-| **凭据不进对话上下文** | `.claude/settings.json` 的 `Read(.env)` deny + 命令守卫拦下 `cat`/`head`/`less` 读 `.env`。要看有哪些配置项去 `.env.example` |
+| **凭据不进对话上下文** | `.claude/settings.json` 的 `Read(.env)` deny + 命令守卫拦下 `cat`/`head`/`less` 读 `.env`，`gh auth token` 同样不放行。要看有哪些配置项去 `.env.example` |
 | **凭据不进公开历史** | `.gitignore` + 命令守卫拦下 `git add .env` 与 `git add -f`。**挡不住「把密钥粘进代码里」**，那只能靠提交前看一眼 `git diff --staged` |
 | 依赖只经 uv 装 | 守卫拦下 `pip install`，并给出 `uv add` 的写法 |
 | 命令只在项目环境里跑 | 守卫拦下裸 `pytest` / `mypy` / `ruff` / `uvicorn`，提示走 `uv run` |
 | **make 只放已授权的 target** | `settings.json` 逐条精确列出；`Bash(make:*)` 刻意不加 —— target 里能写任意命令，通配一条就等于给守卫开后门。新 target 默认不授权 |
+| **迁移不悄悄删数据** | `tests/test_migration_safety.py`：`upgrade()` 里出现删表/删列，就必须在文件里写一行 `# DESTRUCTIVE-OK: <理由>`。只扫 `upgrade()` —— `downgrade()` 里的 drop 是回滚，每个建表迁移都有 |
+| **改了 model 别忘了生成迁移** | `alembic check` 跑在 CI 的集成 job 里（要连真实库） |
 | 数据卷不被顺手删掉 | 守卫拦下 `docker compose down -v` |
 | **push 要人明确说** | `settings.json` 里 `Bash(git push:*)` 是 deny。用户说「提交」只意味着 commit |
 | 只读命令不该反复弹窗 | 守卫按「拆出每个命令位置的可执行名，全部只读才放行」自动放行，边界写在 [`.claude/bash_guard.py`](.claude/bash_guard.py) 的模块 docstring 里 |
@@ -116,7 +118,11 @@ uv run uvicorn adpilot.main:app --reload
 uv run ruff check . && uv run ruff format --check .
 uv run mypy src tests
 uv run pytest                                    # 单元测试，不需要外部服务
-RUN_INTEGRATION=1 uv run pytest -m integration   # 需要 compose 那套环境
+RUN_INTEGRATION=1 uv run pytest -m integration   # 需要 compose 那套环境 + 先迁移
+
+uv run alembic upgrade head                      # 把库升到最新 schema
+uv run alembic revision --autogenerate -m "..."  # 生成迁移草稿，**必须人看一遍**
+uv run alembic check                             # 改了 model 却忘了生成迁移就报错
 
 docker compose up -d
 docker compose logs -f api

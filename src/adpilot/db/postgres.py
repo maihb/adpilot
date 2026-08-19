@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 
+from sqlalchemy import MetaData
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -18,9 +19,28 @@ from sqlalchemy.orm import DeclarativeBase
 
 from adpilot.config import Settings
 
+# 约束与索引的命名模板。不配这个的话，名字由 PostgreSQL 自动生成
+# （`ad_accounts_platform_external_id_key` 这种），于是迁移里的 drop/alter 得
+# 引用一个不由我们控制的名字 —— 而 Alembic 只有拿得到稳定的名字，生成的 diff
+# 才稳定、才可读。这件事必须在**第一份迁移之前**定死：表建出来之后再改约定，
+# 等于给每一条已有约束手写一次改名。
+NAMING_CONVENTION = {
+    "ix": "ix_%(table_name)s_%(column_0_N_name)s",
+    "uq": "uq_%(table_name)s_%(column_0_N_name)s",
+    "ck": "ck_%(table_name)s_%(constraint_name)s",
+    "fk": "fk_%(table_name)s_%(column_0_name)s_%(referred_table_name)s",
+    "pk": "pk_%(table_name)s",
+}
+
 
 class Base(DeclarativeBase):
-    """全项目 ORM 模型的声明式基类。"""
+    """全项目 ORM 模型的声明式基类。
+
+    模型定义都在 `adpilot.models`，那里是表结构的真相源；这里只提供基类和
+    上面那套命名约定。
+    """
+
+    metadata = MetaData(naming_convention=NAMING_CONVENTION)
 
 
 def create_engine(settings: Settings) -> AsyncEngine:

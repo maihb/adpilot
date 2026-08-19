@@ -11,7 +11,9 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  UV_VERSION: "0.5.11"
+  # 与本机开发用的 uv 对齐。锁文件的格式随 uv 版本演进（`revision` 字段），
+  # CI 钉住一个比本机老得多的版本，迟早会出现「本地 lock 得动、CI 读不了」。
+  UV_VERSION: "0.12.5"
   PYTHON_VERSION: "3.12"
 
 jobs:
@@ -84,9 +86,13 @@ jobs:
       POSTGRES_DB: adpilot
       POSTGRES_USER: adpilot
       POSTGRES_PASSWORD: ci-not-a-secret
-      MONGO_URI: mongodb://adpilot:ci-not-a-secret@localhost:27017/?authSource=admin
+      MONGO_HOST: localhost
+      MONGO_PORT: "27017"
+      MONGO_USER: adpilot
+      MONGO_PASSWORD: ci-not-a-secret
       MONGO_DB: adpilot_raw
-      REDIS_URL: redis://localhost:6379/0
+      REDIS_HOST: localhost
+      REDIS_PORT: "6379"
 
     steps:
       - uses: actions/checkout@v4
@@ -99,6 +105,16 @@ jobs:
 
       - name: Install dependencies
         run: uv sync --frozen --all-extras
+
+      # 迁移能不能真的跑起来，只有真跑一次才知道 —— 单元测试碰不到 DDL。
+      - name: Migrations apply cleanly
+        run: uv run alembic upgrade head
+
+      # 「改了 model 却忘了生成迁移」的门禁（Schema 方案第六节）。必须排在
+      # upgrade 之后：check 比对的是「当前这个库」和 models/，库得先被带到 head
+      # 才比得出东西来。
+      - name: Models and migrations agree
+        run: uv run alembic check
 
       - name: Integration tests
         run: uv run pytest -m integration

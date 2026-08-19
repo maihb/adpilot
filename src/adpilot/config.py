@@ -7,12 +7,21 @@
 2. **凭据一律用 `SecretStr`。** 它们不会因为一次日志、一次异常栈或一次
    `repr()` 意外泄出来；要读必须显式调 `.get_secret_value()`，review 时
    一 grep 就能找全。
+3. **连接串一律由零件拼，不收整条 URI。** 三个库都是 `*_HOST` / `*_PORT` /
+   账号密码进来，DSN 由下面的 property 拼出去。收整条 URI 的代价是同一个事实
+   有两处真相：`MONGO_PORT` 和 `MONGO_URI` 里的端口迟早会不一致，而症状是
+   「compose 里跑得好好的，本机连到别的服务上去了」—— 一个不会报错、只会给出
+   奇怪结果的失败。
+
+⚠️ 拼出来的那三个连接串**里面带着明文密码**（驱动只认这个形态）。它们只喂给
+驱动，不要记进日志、不要放进异常消息 —— `SecretStr` 到这一步就保护不了了。
 """
 
 from __future__ import annotations
 
 from enum import StrEnum
 from functools import lru_cache
+from urllib.parse import quote
 
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -24,6 +33,17 @@ class Environment(StrEnum):
     DEV = "dev"
     TEST = "test"
     PROD = "prod"
+
+
+def _credentials(user: str, password: SecretStr) -> str:
+    """拼出连接串里的 `user:password@` 段，两边都做 percent-encode。
+
+    🔴 **编码不是可有可无的。** README 让人用 `openssl rand -base64 24` 生成
+    密码，而 base64 的字符集里就有 `+` 和 `/` —— 一个 `/` 会把 DSN 从那里截断，
+    于是驱动去连一个根本不存在的主机，报错跟「密码里有个斜杠」八竿子打不着。
+    用户名同样编码：`@` 出现在用户名里是一样的效果。
+    """
+    return f"{quote(user, safe='')}:{quote(password.get_secret_value(), safe='')}@"
 
 
 class Settings(BaseSettings):
@@ -50,20 +70,53 @@ class Settings(BaseSettings):
     postgres_password: SecretStr = Field(default=SecretStr(""))
 
     # --- MongoDB：平台原始报表快照，append-only ---
-    mongo_uri: SecretStr = Field(default=SecretStr("mongodb://localhost:27017"))
+    mongo_host: str = "localhost"
+    mongo_port: int = 27017
     mongo_db: str = "adpilot_raw"
+    mongo_user: str = "adpilot"
+    mongo_password: SecretStr = Field(default=SecretStr(""))
+    # 认证库。用 root 账号时是 admin（compose 里那份就是），连一个已经存在的
+    # Mongo、账号建在业务库下时，要改成那个库名 —— 填错的症状是认证失败，
+    # 而报错并不会告诉你它去哪个库找的账号。
+    mongo_auth_source: str = "admin"
 
     # --- Redis：平台 API 限流令牌桶、热点指标缓存 ---
-    redis_url: SecretStr = Field(default=SecretStr("redis://localhost:6379/0"))
+    redis_host: str = "localhost"
+    redis_port: int = 6379
+    redis_db: int = 0
+    # Redis 这一项**空着是正常状态**，不是「凭据缺了个默认值」：compose 里的
+    # Redis 只在内网监听、没开 requirepass。真给它配了密码就填在这里。
+    redis_password: SecretStr = Field(default=SecretStr(""))
 
     @property
     def postgres_dsn(self) -> str:
-        """由上面各项拼出的异步 SQLAlchemy DSN。"""
-        password = self.postgres_password.get_secret_value()
+        """异步 SQLAlchemy DSN。"""
         return (
-            f"postgresql+asyncpg://{self.postgres_user}:{password}"
-            f"@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
+            f"postgresql+asyncpg://{_credentials(self.postgres_user, self.postgres_password)}"
+            f"{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
         )
+
+    @property
+    def mongo_uri(self) -> str:
+        """Mongo 连接串。
+
+        末尾那个 `/` 不能省：没有它，`?authSource=` 会被当成路径的一部分。
+        """
+        return (
+            f"mongodb://{_credentials(self.mongo_user, self.mongo_password)}"
+            f"{self.mongo_host}:{self.mongo_port}/?authSource={self.mongo_auth_source}"
+        )
+
+    @property
+    def redis_url(self) -> str:
+        """Redis 连接串。
+
+        没配密码就不带认证段 —— 拼一个空的 `:@` 上去，客户端会真的发一次
+        AUTH，然后被一台没开认证的 Redis 拒掉。
+        """
+        password = self.redis_password.get_secret_value()
+        credentials = f":{quote(password, safe='')}@" if password else ""
+        return f"redis://{credentials}{self.redis_host}:{self.redis_port}/{self.redis_db}"
 
     @property
     def is_production(self) -> bool:

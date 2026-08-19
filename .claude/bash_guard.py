@@ -90,6 +90,7 @@ READONLY = {
     "df",
     "du",
     "git",
+    "gh",
     "docker",
     "uv",
     "ruff",
@@ -124,6 +125,24 @@ GIT_READONLY = {
     "for-each-ref",
     "stash",
 }
+
+# gh 的只读命令，**精确到「子命令 + 动作」两级**。只认第一级会出事：
+# `gh workflow list` 是读，`gh workflow run` 会真的触发一次 CI；`gh pr view`
+# 是读，`gh pr merge` 会合并。
+GH_READONLY = {
+    "run": {"list", "view"},
+    "pr": {"list", "view", "diff", "checks", "status"},
+    "issue": {"list", "view", "status"},
+    "workflow": {"list", "view"},
+    "repo": {"list", "view"},
+    "release": {"list", "view"},
+    "cache": {"list"},
+    "label": {"list"},
+    "search": {"repos", "issues", "prs", "code", "commits"},
+}
+
+# 顶级即完整命令的只读形态。
+GH_READONLY_TOP = {"status", "version"}
 
 # docker 的只读子命令。run/exec/rm/build/compose up 一律不在此列。
 DOCKER_READONLY = {
@@ -480,6 +499,31 @@ def git_ok(tokens: list[str]) -> bool:
     return False
 
 
+def gh_ok(rest: list[str]) -> bool:
+    """gh 的参数级判定：「子命令 + 动作」两级都在白名单里才算只读。
+
+    三类刻意不放行，都不是判不了，而是判了也不该放：
+
+    * **`gh auth`** —— `gh auth token` 会把凭据直接打进对话上下文，这正是
+      硬规矩 1 要挡的事；`gh auth status --show-token` 同理。
+    * **`gh api`** —— GET 是读，但 `-X POST`、`-f`、GraphQL mutation 都是写，
+      逐个 flag 判下来并不比多问一次便宜。
+    * **`gh run download` / `gh browse`** —— 一个写盘，一个开浏览器。
+
+    位置参数取不到两级（`gh pr --repo x/y view` 这种把选项插在中间的写法）就
+    落回询问 —— 方向是宁可误拦，不可误放。
+    """
+    if any(a == "--web" for a in rest):
+        return False  # 打开浏览器算副作用，不是「看一眼」
+    args = [a for a in rest if not a.startswith("-")]
+    if not args:
+        return False
+    if args[0] in GH_READONLY_TOP:
+        return True
+    actions = GH_READONLY.get(args[0])
+    return actions is not None and len(args) > 1 and args[1] in actions
+
+
 def uv_ok(rest: list[str]) -> bool:
     """uv 的参数级判定。`uv run X` 由调用方先剥掉，走不到这里。"""
     if not rest:
@@ -555,6 +599,8 @@ def cmd_ok(tokens: list[str]) -> bool:
     rest = tokens[1:]
     if name == "git":
         return git_ok([name, *rest])
+    if name == "gh":
+        return gh_ok(rest)
     if name == "uv":
         return uv_ok(rest)
     if name == "ruff":

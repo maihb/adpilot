@@ -54,6 +54,12 @@ READONLY_COMMANDS = [
     "uv run ruff format --check .",
     "uv run mypy src tests",
     "uv run alembic current",
+    "gh run list --limit 5",
+    "gh run view 12345 --log-failed",
+    "gh pr checks",
+    "gh pr diff 7",
+    "gh workflow list",
+    "gh run list --json conclusion,headBranch | jq '.[0]'",
     "docker compose ps",
     "docker compose logs --tail 50 api",
     "curl -fsS http://localhost:8000/api/health/live",
@@ -92,6 +98,20 @@ NOT_READONLY_COMMANDS = [
     "rm -rf build",
     "sed -i '' 's/a/b/' README.md",
     "find . -name '*.pyc' -delete",
+    # gh 只认「子命令 + 动作」两级：第一级同名，第二级天差地别
+    "gh pr merge 7 --squash",
+    "gh workflow run ci.yml",
+    "gh run rerun 12345",
+    "gh issue close 3",
+    "gh release create v0.1.0",
+    "gh run download 12345",
+    # gh auth token 会把凭据打进上下文 —— 撞的是硬规矩 1，不是「判不了」
+    "gh auth token",
+    "gh auth status --show-token",
+    # gh api 的 GET 是读，但同一个子命令也能发 POST，不逐个 flag 猜
+    "gh api repos/maihb/adpilot/actions/runs",
+    # --web 会开浏览器，不算「看一眼」
+    "gh pr view 7 --web",
     # 判不了目标，宁可多问一次
     "$(which ls) -la",
     "python3 -c 'import os; print(os.getcwd())'",

@@ -34,7 +34,7 @@ def create_client(settings: Settings) -> MongoClient:
     而不是按默认值干等 30 秒。
     """
     return AsyncIOMotorClient(
-        settings.mongo_uri.get_secret_value(),
+        settings.mongo_uri,
         serverSelectionTimeoutMS=2000,
         tz_aware=True,
     )

@@ -45,6 +45,13 @@ WORKDIR /app
 COPY --from=builder --chown=adpilot:adpilot /app/.venv /app/.venv
 COPY --from=builder --chown=adpilot:adpilot /app/src /app/src
 
+# 迁移脚本和它的配置也得进镜像：升 schema 是在容器里跑的
+# （`docker compose run --rm api alembic upgrade head`），而运行阶段这个镜像里
+# 既没有包管理器也没有仓库源码。**启动时不自动迁移** —— 自动迁移意味着你看不见
+# 它执行了什么，生产环境不可接受（Schema 方案第七节）。
+COPY --chown=adpilot:adpilot alembic.ini ./
+COPY --chown=adpilot:adpilot migrations/ ./migrations/
+
 USER adpilot
 
 EXPOSE 8000
