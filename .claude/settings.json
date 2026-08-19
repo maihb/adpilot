@@ -1,0 +1,140 @@
+{
+  "env": {
+    "GIT_PAGER": "cat"
+  },
+  "permissions": {
+    "allow": [
+      "Bash(uv sync:*)",
+      "Bash(uv add:*)",
+      "Bash(uv remove:*)",
+      "Bash(uv lock:*)",
+      "Bash(uv tree:*)",
+      "Bash(uv pip list:*)",
+      "Bash(uv pip show:*)",
+      "Bash(uv python:*)",
+      "Bash(uv version)",
+      "Bash(uv run pytest:*)",
+      "Bash(uv run ruff:*)",
+      "Bash(uv run mypy:*)",
+      "Bash(uv run alembic:*)",
+      "Bash(uv run uvicorn:*)",
+      "Bash(uv run python -c:*)",
+      "Bash(RUN_INTEGRATION=1 uv run pytest:*)",
+
+      "Bash(docker:*)",
+
+      "Bash(ls:*)",
+      "Bash(rg:*)",
+      "Bash(grep:*)",
+      "Bash(find:*)",
+      "Bash(wc:*)",
+      "Bash(head:*)",
+      "Bash(tail:*)",
+      "Bash(sed:*)",
+      "Bash(awk:*)",
+      "Bash(tr:*)",
+      "Bash(cut:*)",
+      "Bash(sort:*)",
+      "Bash(uniq:*)",
+      "Bash(diff:*)",
+      "Bash(jq:*)",
+      "Bash(stat:*)",
+      "Bash(file:*)",
+      "Bash(bash -n:*)",
+      "Bash(mkdir:*)",
+      "Bash(touch:*)",
+      "Bash(cp:*)",
+      "Bash(mv:*)",
+
+      "Bash(pwd)",
+      "Bash(echo:*)",
+      "Bash(printf:*)",
+      "Bash(date:*)",
+      "Bash(uname:*)",
+      "Bash(which:*)",
+      "Bash(type:*)",
+      "Bash(ps:*)",
+      "Bash(lsof:*)",
+      "Bash(curl -fsS http://localhost:*)",
+      "Bash(curl -fsS http://127.0.0.1:*)",
+      "Bash(openssl rand:*)",
+
+      "Bash(git status:*)",
+      "Bash(git log:*)",
+      "Bash(git diff:*)",
+      "Bash(git show:*)",
+      "Bash(git branch:*)",
+      "Bash(git blame:*)",
+      "Bash(git rev-parse:*)",
+      "Bash(git ls-files:*)",
+      "Bash(git check-ignore:*)",
+      "Bash(git remote:*)",
+      "Bash(git config --get:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git checkout:*)",
+      "Bash(git switch:*)",
+      "Bash(git restore:*)",
+      "Bash(git stash:*)",
+      "Bash(git mv:*)",
+      "Bash(git rm:*)",
+
+      "Read",
+      "Edit",
+      "Write",
+      "WebSearch",
+      "Skill(update-config)"
+    ],
+    "deny": [
+      "Read(.env)",
+      "Read(**/.env)",
+      "Read(**/*.pem)",
+      "Read(**/*.key)",
+      "Read(**/credentials.json)",
+      "Bash(cat:*)",
+      "Bash(rm -rf:*)",
+      "Bash(sed -i:*)",
+      "Bash(awk -i:*)",
+      "Bash(git -C:*)",
+      "Bash(git push:*)",
+      "Bash(pip install:*)",
+      "Bash(pip3 install:*)",
+      "Bash(uv pip install:*)"
+    ],
+    "defaultMode": "acceptEdits"
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/bash-guard.sh"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/format-hook.sh"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/stop-hook.sh"
+          }
+        ]
+      }
+    ]
+  }
+}

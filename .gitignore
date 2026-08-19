@@ -44,6 +44,13 @@ client/dist/
 
 # IDE / OS
 .idea/
+# .vscode 下只放「clone 下来就该是对的」那两项：解释器指向项目 .venv、
+# 格式化器用 ruff。个人偏好仍然留在各自的全局设置里，不进仓库。
 .vscode/*
 !.vscode/extensions.json
+!.vscode/settings.json
 .DS_Store
+
+# Claude Code：项目级配置与钩子进仓库（它们是这个仓库护栏的一部分），
+# 本机私有覆盖不进 —— settings.local.json 里常有绝对路径和个人偏好
+.claude/settings.local.json
