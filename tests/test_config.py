@@ -16,6 +16,9 @@ from urllib.parse import unquote, urlsplit
 from pydantic import SecretStr
 
 from adpilot.config import Environment, Settings
+from adpilot.db.mongo import create_client as create_mongo_client
+from adpilot.db.postgres import create_engine
+from adpilot.db.redis import create_client as create_redis_client
 
 # 同时覆盖 base64 会产出的 `/` `+` `=`，以及 URI 里的两个分隔符 `:` `@`。
 # 是一串刻意难看的假值，不是任何地方的真实凭据。
@@ -83,6 +86,25 @@ def test_redis_url_carries_an_encoded_password_when_one_is_set() -> None:
 
     assert parsed.hostname == "redis.internal"
     assert unquote(parsed.password or "") == TRICKY
+
+
+def test_clients_construct_when_nothing_is_configured() -> None:
+    """一个凭据都没配时，三个客户端仍然必须**构造得出来**。
+
+    这条是 CI 上真红过一次才补的：`mongodb://adpilot:@host` 会让 pymongo 在
+    构造时（不是连接时）抛 `ConfigurationError: A password is required`，于是
+    进程起不来、存活探针永远等不到人应答 —— CI 的 docker job 正是这个场景，
+    它只传 POSTGRES_PASSWORD 就把容器拉起来验存活。
+
+    断言的是 architecture.md 那条约定：**构造客户端不等于连上去**。依赖没配好
+    该由就绪探针报成 unhealthy，不该让启动过程崩掉。
+    """
+    bare = Settings(_env_file=None, environment=Environment.TEST)
+
+    # 只构造，不发任何请求 —— 三个驱动都是懒连接
+    create_engine(bare)
+    create_mongo_client(bare)
+    create_redis_client(bare)
 
 
 def test_secrets_do_not_leak_through_repr() -> None:

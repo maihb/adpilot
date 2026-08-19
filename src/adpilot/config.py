@@ -101,9 +101,23 @@ class Settings(BaseSettings):
         """Mongo 连接串。
 
         末尾那个 `/` 不能省：没有它，`?authSource=` 会被当成路径的一部分。
+
+        没配密码就**整段认证都不拼**（和 `redis_url` 同一个道理，但 Mongo 这边
+        更凶）：`mongodb://adpilot:@host` 会让 pymongo 在 `AsyncIOMotorClient(...)`
+        **构造时**就抛 `ConfigurationError: A password is required` —— 不是连接
+        时，是构造时。于是整个进程起不来，存活探针永远等不到人应答。
+
+        而按 [architecture.md](../../docs/code-rules/architecture.md) 的约定，
+        构造客户端不等于连上去：某个依赖没配好或短暂挂掉时，进程仍然要能起来，
+        「连不上」该由就绪探针报，不该由启动过程报。
         """
+        credentials = (
+            _credentials(self.mongo_user, self.mongo_password)
+            if self.mongo_password.get_secret_value()
+            else ""
+        )
         return (
-            f"mongodb://{_credentials(self.mongo_user, self.mongo_password)}"
+            f"mongodb://{credentials}"
             f"{self.mongo_host}:{self.mongo_port}/?authSource={self.mongo_auth_source}"
         )
 
