@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 
@@ -33,7 +33,7 @@ class Resources:
 
 
 @asynccontextmanager
-async def open_resources(settings: Settings) -> AsyncIterator[Resources]:
+async def open_resources(settings: Settings) -> AsyncGenerator[Resources, None]:
     """打开全部连接池，退出时逐个关闭。
 
     构造客户端并不会真的连上去 —— 三个驱动都是懒连接。这是故意的：某个依赖短暂

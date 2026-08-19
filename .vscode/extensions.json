@@ -1,0 +1,10 @@
+{
+  // ruff 是必要的：它同时是本项目的 linter 和 formatter，读的就是 pyproject.toml
+  // 里那份配置，所以编辑器里看到的结论和 CI 完全一致。装了它，settings.json 里
+  // 的保存时格式化才生效。
+  "recommendations": [
+    "charliermarsh.ruff",
+    "ms-python.python",
+    "ms-python.vscode-pylance"
+  ]
+}
