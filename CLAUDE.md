@@ -20,6 +20,7 @@
 | 任务 | 读 |
 |---|---|
 | 范围、里程碑、哪些是**刻意不做**的 | [`docs/design/2026-08-19-mvp-design.md`](docs/design/2026-08-19-mvp-design.md) |
+| **加表 / 改字段、迁移怎么生成、autogenerate 有哪些盲区** | [`docs/design/2026-08-19-schema-migration.md`](docs/design/2026-08-19-schema-migration.md) |
 | **代码摆在哪、依赖往哪个方向走** | [`docs/code-rules/architecture.md`](docs/code-rules/architecture.md) |
 | 金额 / 时区 / 类型 / 异步 / 测试 / 日志 / 配置密钥 / **改完必做清单** | [`docs/code-rules/conventions.md`](docs/code-rules/conventions.md) |
 | **加一个接口**（含可照抄的四步与踩坑速查） | [`docs/code-rules/api.md`](docs/code-rules/api.md) |

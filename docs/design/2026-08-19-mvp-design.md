@@ -103,7 +103,7 @@ Meta 一年能改三次字段叫法，TikTok 同理。**上个月的报表用的
 |---|---|---|
 | 语言 | Python 3.12 + **uv** | uv 装依赖比 pip/poetry 快一个量级，`uv.lock` 锁定可复现；3.12 是 FastAPI 生态最稳的版本 |
 | Web | **FastAPI** | 拉广告 API 是大量 IO 等待，async 是对的模型；自带 OpenAPI → 前端类型可生成（延续 gots 的接口契约主张） |
-| ORM | SQLAlchemy 2.0 + Alembic | 2.0 的 typed ORM 有真实类型提示；Alembic 做迁移版本化 |
+| ORM | SQLAlchemy 2.0 + Alembic | 2.0 的 typed ORM 有真实类型提示；Alembic 做迁移版本化。候选对比与使用边界见 [Schema 与迁移方案](2026-08-19-schema-migration.md) |
 | 任务 | **Celery + RabbitMQ** | 拉数是长任务、平台有速率限制、失败要退避重试——正是 MQ 的活。选 RabbitMQ 不选 Redis broker：需要真正的 ack 和死信队列，任务丢了等于数据缺一天 |
 | 关系库 | PostgreSQL 18 | `numeric` 精确金额、窗口函数算环比、JSONB 存半结构化维度 |
 | 文档库 | **MongoDB** | 见上节 |
@@ -147,6 +147,9 @@ class ReportProvider(Protocol):
 **每次 LLM 调用记录 token 数与预估成本**——延续作者已有的调用日志与成本追踪实践。
 
 ## 六、数据模型（骨架，以 Alembic 迁移为准）
+
+> 下面只是骨架。表定义的真相源是 `src/adpilot/models/`，schema 怎么演进见
+> [Schema 与迁移方案](2026-08-19-schema-migration.md)。
 
 PostgreSQL 核心表：
 
