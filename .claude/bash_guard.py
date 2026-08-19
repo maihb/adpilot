@@ -515,6 +515,11 @@ def gh_ok(rest: list[str]) -> bool:
     """
     if any(a == "--web" for a in rest):
         return False  # 打开浏览器算副作用，不是「看一眼」
+    # flag 形态的纯查询，出现在哪一级都只是打印文本 —— `gh pr merge --help` 也
+    # 只会印出帮助。跟 uv 那条同一个坑：下面按位置参数判定，会把 `--version`
+    # 连同其它选项一起滤掉，于是「查个版本号」也要弹一次窗。
+    if any(a in ("--version", "--help", "-h") for a in rest):
+        return True
     args = [a for a in rest if not a.startswith("-")]
     if not args:
         return False

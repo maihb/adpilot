@@ -54,6 +54,11 @@ READONLY_COMMANDS = [
     "uv run ruff format --check .",
     "uv run mypy src tests",
     "uv run alembic current",
+    # flag 形态的版本/帮助查询。与上面 `uv --version` 同一个坑：gh_ok() 按位置
+    # 参数判定，会把这类 flag 一起滤掉，于是查个版本号也要弹窗。
+    "gh --version",
+    "gh --help",
+    "gh pr merge --help",
     "gh run list --limit 5",
     "gh run view 12345 --log-failed",
     "gh pr checks",
