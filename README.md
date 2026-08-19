@@ -87,7 +87,10 @@ cp .env.example .env
 # 本仓库里没有任何服务带默认凭据
 openssl rand -base64 24
 
-docker compose up
+docker compose up -d
+
+# 建表。刻意不做「启动时自动迁移」—— 那意味着你看不见它执行了什么
+docker compose run --rm api alembic upgrade head
 ```
 
 然后：
@@ -113,7 +116,9 @@ curl -LsSf https://astral.sh/uv/install.sh | sh   # 或 brew install uv
 make bootstrap    # 新机器就跑这一条：生成 .env + 按 uv.lock 装依赖
 make dev          # 起接口服务，热重载
 make check        # 推送前跑这条：CI 卡的四道门禁一次跑完
-make test-int     # 集成测试，需要 make up 那套环境在跑
+make migrate      # 把库升到最新 schema
+make revision m='加一列 xxx'   # 改完 models/ 生成迁移草稿，**要人看一遍再提交**
+make test-int     # 集成测试，需要 make up 那套环境 + 先 make migrate
 make up / down / logs
 ```
 

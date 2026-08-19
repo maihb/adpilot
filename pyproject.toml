@@ -18,6 +18,7 @@ dependencies = [
     "motor>=3.6",
     "redis>=5.2",
     "structlog>=24.4",
+    "alembic>=1.19.1",
 ]
 
 [project.optional-dependencies]
@@ -84,6 +85,13 @@ plugins = ["pydantic.mypy"]
 [[tool.mypy.overrides]]
 module = ["motor.*"]
 ignore_missing_imports = true
+
+# Alembic 的迁移是由模板生成的，带不了 strict 级别的类型注解，而它们又不能改成
+# 「写得好看点」—— 迁移一旦提交就是历史，只能原样留着。CI 跑的是 `mypy src
+# tests`，本来就绕开了这里；这条 override 是给「有人跑 mypy .」准备的。
+[[tool.mypy.overrides]]
+module = ["migrations.*"]
+ignore_errors = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

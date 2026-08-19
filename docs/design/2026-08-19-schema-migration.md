@@ -1,6 +1,6 @@
 # 数据层 Schema 与迁移方案
 
-> 2026-08-19 · 状态：已定，未开工
+> 2026-08-19 · 状态：**已落地**（三张表 + 首份迁移 + 第六节两道门禁）
 >
 > 深化 [MVP 设计文档](2026-08-19-mvp-design.md) 第四节选型表里「ORM：SQLAlchemy 2.0 + Alembic」那一行 —— 那里只有结论，这里记录候选、淘汰理由和使用边界。
 >
@@ -92,14 +92,24 @@ class Campaign(Base):
 
 3. **部分索引改动时手工确认。** 能用 `postgresql_where=` 声明，但 autogenerate 对它的 diff 不可信。
 
+4. **迁移文件不 import 应用代码。**（落地时踩到才补的一条）自定义列类型会被
+   autogenerate 渲染成 `adpilot.models.types.StrEnumType(length=16)`，而它**不会
+   替你加那句 import** —— 生成出来的文件当场就是坏的。补上 import 只治了症状：
+   迁移一旦提交就永不修改，而应用代码会被重构、改名、删掉，那天所有引用它的
+   历史迁移一起崩。解法是 `env.py` 里的 `render_item`，把自定义类型渲染成
+   SQLAlchemy 自带类型（`StrEnumType` 在库里本来就是 varchar，DDL 完全等价）。
+
 ## 六、门禁
 
 按硬规矩 6（「重要就得能让构建失败」），两条进 CI：
 
 | 门禁 | 拦什么 | 实现 |
 |---|---|---|
-| `alembic check` | **改了 model 但忘了生成迁移** | 一行命令，进 `ci.yml` |
-| 迁移文件出现 `drop_column` / `drop_table` 时要求显式确认注释 | **自动生成的 DDL 悄悄删列** | 自写小脚本 |
+| `alembic check` | **改了 model 但忘了生成迁移** | `ci.yml` 的集成 job（要连真实库，所以不在单元那一档） |
+| `upgrade()` 里出现 `drop_column` / `drop_table` 就要求写 `# DESTRUCTIVE-OK: <理由>` | **自动生成的 DDL 悄悄删列** | `tests/test_migration_safety.py`，跟着 `pytest` 跑 |
+
+第二条**只扫 `upgrade()`**：`downgrade()` 里的 `drop_table` 是回滚路径，每一个
+建表迁移都有，一起扫的话门禁第一天就会变成人人跳过的噪音。
 
 第二条是本方案最关键的补强：它把第一节说的那个高风险动作，从「靠人注意」变成「机器拦人」—— 也就是 Atlas 用 migration lint 内置提供、而 Alembic 缺失的那个能力。
 

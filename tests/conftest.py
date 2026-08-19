@@ -12,14 +12,16 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from adpilot.config import Environment, Settings
+from adpilot.db.postgres import create_engine
 from adpilot.main import create_app
 
 
@@ -75,3 +77,30 @@ def live_client(live_settings: Settings) -> Iterator[TestClient]:
     """接到真实后端服务上的测试客户端。"""
     with TestClient(create_app(live_settings)) as client:
         yield client
+
+
+@pytest.fixture
+async def live_session(live_settings: Settings) -> AsyncIterator[AsyncSession]:
+    """连真实 PostgreSQL 的会话，**用例结束整体回滚**。
+
+    表得先存在 —— 跑之前先 `make migrate`（CI 里那一步在集成测试之前）。
+
+    隔离靠的是「把 session 挂进一个外层事务」：`join_transaction_mode` 设成
+    `create_savepoint`，用例里照常 `commit()` 也只是释放一个 SAVEPOINT，最后
+    外层一 rollback 就什么都没留下。不这么做的话，用例之间会靠残留数据互相
+    影响，而那种失败只在特定执行顺序下出现，最难查。
+    """
+    engine = create_engine(live_settings)
+    try:
+        async with engine.connect() as connection:
+            transaction = await connection.begin()
+            factory = async_sessionmaker(
+                bind=connection,
+                expire_on_commit=False,
+                join_transaction_mode="create_savepoint",
+            )
+            async with factory() as session:
+                yield session
+            await transaction.rollback()
+    finally:
+        await engine.dispose()

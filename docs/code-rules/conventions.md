@@ -92,7 +92,7 @@
 | 动哪 | 漏了会怎样 |
 |---|---|
 | `config.py` 的 `Settings` | 代码里根本读不到 |
-| `.env.example` | 别人 clone 下来不知道要填什么 |
+| `.env.example` | 别人 clone 下来不知道要填什么；**本机直接跑时也读它** —— 漏了的项会静默落到 `Settings` 里的默认值，连到一个你没想到的地方去 |
 | `docker-compose.yml` | 容器里没有，本机跑得通、compose 起不来 |
 | `.github/workflows/ci.yml`（若集成测试要用） | CI 红，本地绿 |
 
@@ -154,9 +154,17 @@
   留痕，也是重跑归一化的输入
 - 唯一键该建就建。`daily_metrics` 的 `(account_id, level, object_id, stat_date)`
   是幂等重导的依据 —— 没有它，同一天导两次就是双倍花费
+- **删表 / 删列要在迁移文件里写一行 `# DESTRUCTIVE-OK: <理由>`**，否则
+  `tests/test_migration_safety.py` 会红。被它拦到时先想清楚：这真是删，还是一次
+  **改名**被 autogenerate 拆成了 drop + add？后者要手工并回
+  `op.alter_column(..., new_column_name=...)`
+- **迁移文件不许 import 应用代码。** 迁移一旦提交就是历史、永不修改，而应用代码
+  会被重构改名 —— 那天所有引用它的历史迁移一起崩。自定义列类型经
+  `migrations/env.py` 的 `render_item` 渲染成 SQLAlchemy 自带类型
 
-> 🚧 Alembic 随 D3 的领域模型一起引入，届时把「怎么跑迁移」补进
-> [`../../CLAUDE.md`](../../CLAUDE.md) 的常用命令表。
+命令见 [`../../CLAUDE.md`](../../CLAUDE.md) 的「常用命令」，工作循环和
+autogenerate 的盲区清单见
+[Schema 与迁移方案](../design/2026-08-19-schema-migration.md)。
 
 ---
 

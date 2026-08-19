@@ -26,7 +26,7 @@ COMPOSE ?= docker compose
 
 .DEFAULT_GOAL := help
 
-.PHONY: help bootstrap env setup dev lint fmt types test test-int check up down logs ps
+.PHONY: help bootstrap env setup dev lint fmt types test test-int check migrate revision up down logs ps
 
 help: ## 显示这份清单
 	@awk 'BEGIN {FS = ":.*##"} \
@@ -77,10 +77,23 @@ types: ## mypy strict
 test: ## 单元测试，不需要任何外部服务
 	$(UV) run pytest
 
-test-int: ## 集成测试，需要 make up 那套环境在跑
+test-int: ## 集成测试，需要 make up 那套环境 + 先 make migrate
 	RUN_INTEGRATION=1 $(UV) run pytest -m integration
 
 check: lint types test ## 推送前跑这条：CI 卡的四道门禁，一次跑完
+
+##@ 数据库迁移
+
+migrate: ## 把数据库升到最新的 schema
+	$(UV) run alembic upgrade head
+
+# 生成的是**草稿**：autogenerate 认不出改名，它会给你一对 drop + add。
+# 盲区清单见 docs/design/2026-08-19-schema-migration.md 第四节。
+revision: ## 按 models/ 的改动生成迁移草稿：make revision m='说明'
+	@test -n "$(m)" || { echo "用法：make revision m='加一列 spend_usd'"; exit 1; }
+	$(UV) run alembic revision --autogenerate -m "$(m)"
+	@echo ""
+	@echo "==> 生成完了，现在去 migrations/versions/ 把它读一遍再提交。"
 
 ##@ 容器
 

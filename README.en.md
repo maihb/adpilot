@@ -100,7 +100,11 @@ cp .env.example .env
 # by design: no service in this repo has a default credential
 openssl rand -base64 24
 
-docker compose up
+docker compose up -d
+
+# Create the tables. Auto-migrating on startup is deliberately not done —
+# it would mean you never see what it executed.
+docker compose run --rm api alembic upgrade head
 ```
 
 Then:
@@ -126,7 +130,9 @@ From there `make help` lists everything. The ones you'll actually use:
 make bootstrap    # new machine, one command: create .env + install from uv.lock
 make dev          # run the API with hot reload
 make check        # run before pushing: all four CI gates in one go
-make test-int     # integration tests, needs the `make up` stack running
+make migrate      # bring the database up to the latest schema
+make revision m='add column xxx'   # draft a migration after editing models/ — **review it before committing**
+make test-int     # integration tests, needs the `make up` stack + `make migrate` first
 make up / down / logs
 ```
 

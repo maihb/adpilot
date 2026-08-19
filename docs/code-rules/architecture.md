@@ -3,9 +3,9 @@
 技术选型的来龙去脉在[设计文档第四节](../design/2026-08-19-mvp-design.md)，这里只讲
 **代码怎么摆、依赖往哪个方向走**。
 
-> **进度**：D1–D2 完成，仓库里现在只有接入骨架（配置、三个客户端、健康检查）。
-> 下面标了 🚧 的目录还不存在 —— 先把位置定下来，是为了三个人（或三个 agent）
-> 各写各的时候不会摆出三套结构。
+> **进度**：D1–D2 完成，D3 起了个头 —— 接入骨架（配置、三个客户端、健康检查）
+> 之外，现在有了 `models/` 与 Alembic 迁移。下面标了 🚧 的目录还不存在 ——
+> 先把位置定下来，是为了三个人（或三个 agent）各写各的时候不会摆出三套结构。
 
 ---
 
@@ -24,7 +24,9 @@ src/adpilot/
   api/
     deps.py         FastAPI 依赖 + Annotated 别名（ResourcesDep/SessionDep/…）
     health.py       存活与就绪探针 —— 加接口时照着它的写法抄
-  models/       🚧  SQLAlchemy ORM 模型，一个领域一个文件
+  models/           SQLAlchemy ORM 模型，一个领域一个文件 —— **表结构的真相源**
+    types.py        自定义列类型（StrEnum 存 varchar，不用 PG 原生 ENUM）
+    mixins.py       共用列（created_at / updated_at）
   schemas/      🚧  对外的 Pydantic 出入参（与 ORM 模型分开，理由见下）
   services/     🚧  业务逻辑，不认识 HTTP
   providers/    🚧  ReportProvider 适配器注册表（文件导入 / Meta / TikTok）
@@ -34,7 +36,9 @@ src/adpilot/
 tests/
   conftest.py       夹具：offline_*（不连外部服务）与 live_*（连真实服务）
   test_*.py         单元测试；需要真实服务的挂 @pytest.mark.integration
-migrations/   🚧    Alembic 版本化迁移
+migrations/         Alembic 版本化迁移 —— schema 演进历史的真相源
+  env.py            DSN 从 Settings 取（不进 ini）；自定义类型的渲染规则也在这
+  versions/         每一份迁移；删表/删列要写 # DESTRUCTIVE-OK
 docs/
   design/           设计文档 —— 范围与决策的真相源
   code-rules/       本目录：怎么写
