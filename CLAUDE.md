@@ -14,15 +14,22 @@
 
 ## 任务 → 读哪个文件
 
-精确加载，不要一上来铺开整棵树。
+精确加载，不要一上来铺开整棵树。文档分三层：`design/` 是**为什么这么定**，
+`code-rules/` 是**怎么写**，`business/` 是**写的是什么**。
 
 | 任务 | 读 |
 |---|---|
-| 范围、里程碑、哪些是**刻意不做**的 | `docs/design/2026-08-19-mvp-design.md` |
+| 范围、里程碑、哪些是**刻意不做**的 | [`docs/design/2026-08-19-mvp-design.md`](docs/design/2026-08-19-mvp-design.md) |
+| **代码摆在哪、依赖往哪个方向走** | [`docs/code-rules/architecture.md`](docs/code-rules/architecture.md) |
+| 金额 / 时区 / 类型 / 异步 / 测试 / 日志 / 配置密钥 / **改完必做清单** | [`docs/code-rules/conventions.md`](docs/code-rules/conventions.md) |
+| **加一个接口**（含可照抄的四步与踩坑速查） | [`docs/code-rules/api.md`](docs/code-rules/api.md) |
+| 分支 / 提交信息 / **推送前自检** / 需明确指令的操作 | [`docs/code-rules/git-workflow.md`](docs/code-rules/git-workflow.md) |
+| **指标口径、时区、数据回填、告警公式** | [`docs/business/glossary.md`](docs/business/glossary.md) |
+| 某个业务领域现在做到哪、规则是什么 | [`docs/business/BUSINESS.md`](docs/business/BUSINESS.md) |
 | 为什么同时用 PostgreSQL 和 MongoDB | `src/adpilot/db/mongo.py` 模块 docstring |
 | 配置、密钥、环境护栏 | `src/adpilot/config.py` |
 | 连接生命周期、`app.state` 里有什么 | `src/adpilot/resources.py` |
-| 加一个接口 | 先看 `src/adpilot/api/health.py` 的写法，再看 `src/adpilot/api/deps.py` |
+| 接口怎么写 | 先看 `src/adpilot/api/health.py`，再看 `src/adpilot/api/deps.py` |
 | 本地环境、端口、服务凭据 | `docker-compose.yml` + `.env.example` |
 | CI 到底卡哪些门禁 | `.github/workflows/ci.yml` |
 
@@ -50,6 +57,29 @@
 6. **每道门禁都要跑在 CI 里。** 一条规矩重要，就把它写成 lint、类型检查或测试。
    只活在文字里的约定一定会腐化。
 
+## 护栏一览
+
+上面那几条规矩之所以立得住，是因为它们大多不靠自觉 —— 已经变成了机器判定。
+**被拦到属正常，读拦截提示照做即可，不要绕。**
+
+| 约束 | 强制机制 |
+|---|---|
+| ruff / format / mypy / pytest 四道门禁 | `.github/workflows/ci.yml`；改过 `.py` 或 `.md` 时 [`.claude/stop-hook.sh`](.claude/stop-hook.sh) 在本地先跑一遍 |
+| 刚写完的文件保持格式 | [`.claude/format-hook.sh`](.claude/format-hook.sh) 就地跑 `ruff format`。**`.md` 也在内** —— ruff 连 Markdown 里的 Python 代码块一起格式化，漏了它同样让 CI 红 |
+| **凭据不进对话上下文** | `.claude/settings.json` 的 `Read(.env)` deny + 命令守卫拦下 `cat`/`head`/`less` 读 `.env`。要看有哪些配置项去 `.env.example` |
+| **凭据不进公开历史** | `.gitignore` + 命令守卫拦下 `git add .env` 与 `git add -f`。**挡不住「把密钥粘进代码里」**，那只能靠提交前看一眼 `git diff --staged` |
+| 依赖只经 uv 装 | 守卫拦下 `pip install`，并给出 `uv add` 的写法 |
+| 命令只在项目环境里跑 | 守卫拦下裸 `pytest` / `mypy` / `ruff` / `uvicorn`，提示走 `uv run` |
+| 数据卷不被顺手删掉 | 守卫拦下 `docker compose down -v` |
+| **push 要人明确说** | `settings.json` 里 `Bash(git push:*)` 是 deny。用户说「提交」只意味着 commit |
+| 只读命令不该反复弹窗 | 守卫按「拆出每个命令位置的可执行名，全部只读才放行」自动放行，边界写在 [`.claude/bash_guard.py`](.claude/bash_guard.py) 的模块 docstring 里 |
+| 守卫自己判错 | `tests/test_bash_guard.py` 跟着 CI 跑 —— 误放一次写操作和误拦一次正常提交，两个方向都有用例 |
+
+**两处已知缺口**（写在这里是为了不假装它们已经被管住）：分层依赖方向、
+「新领域必须有业务文档」目前都只靠 review，补护栏的时机分别记在
+[`architecture.md`](docs/code-rules/architecture.md#分层与依赖方向) 和
+[`BUSINESS.md`](docs/business/BUSINESS.md#加一个领域时)。
+
 ## 工作方式
 
 - **动结构先出设计文档**，再落代码，两者进同一个 PR。
@@ -58,6 +88,10 @@
   **是什么**交给代码。
 - **注释解释不显然的部分。** 为什么是这个超时、为什么用两个库、为什么是这个顺序。
   不要复述代码本身已经说清楚的事。
+- **改了业务规则，回头更新 [`docs/business/`](docs/business/) 里对应那篇**；改了
+  计算口径（阈值、取哪个转化事件、回溯几天）更新
+  [`glossary.md`](docs/business/glossary.md)。那一层一旦不可信，就没人敢照着它跳过
+  源码，等于白写。
 - **语言约定**：一律中文 —— 注释、docstring、本文件、设计文档、`README.md`。
   英文版是 `README.en.md`，它是**译本不是真相源**：改了 `README.md` 才去同步它，
   两边内容必须一致。
