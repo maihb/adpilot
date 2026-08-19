@@ -1,0 +1,58 @@
+"""应用入口。
+
+本地跑：
+
+    uv run uvicorn adpilot.main:app --reload
+"""
+
+from __future__ import annotations
+
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
+import structlog
+from fastapi import FastAPI
+
+from adpilot.api import health
+from adpilot.config import Settings, get_settings
+from adpilot.logging import configure_logging
+from adpilot.resources import open_resources
+
+log = structlog.get_logger(__name__)
+
+
+def create_app(settings: Settings | None = None) -> FastAPI:
+    """构造 FastAPI 应用。
+
+    做成工厂而不是模块级单例，是为了让测试能用自己的配置建应用，不必去动
+    运行测试的那个进程的环境变量。
+    """
+    settings = settings or get_settings()
+    configure_logging(settings)
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        async with open_resources(settings) as resources:
+            app.state.resources = resources
+            log.info("startup_complete", environment=settings.environment)
+            yield
+            log.info("shutdown_started")
+
+    app = FastAPI(
+        title="adpilot",
+        description=(
+            "Self-hosted ad performance hub for Meta and TikTok Ads: pulls "
+            "spend and conversion data, keeps raw snapshots for audit, and "
+            "writes daily reports you can hand to a client."
+        ),
+        version="0.1.0",
+        lifespan=lifespan,
+        docs_url="/docs",
+        openapi_url="/openapi.json",
+    )
+
+    app.include_router(health.router, prefix=settings.api_prefix)
+    return app
+
+
+app = create_app()

@@ -1,0 +1,49 @@
+# 🔴 凭据：本仓库面向公开，密钥一律不进 git
+# 「先放私有仓库以后清理」是陷阱——历史会把密钥带走，清理要重写全部 commit hash
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+credentials.json
+
+# 运行期数据：真实客户数据只在数据库里，不在仓库里
+data/
+uploads/
+imports/
+*.db
+*.sqlite3
+
+# RAG 语料由使用者运行时导入，不随代码分发
+corpus/
+!corpus/.gitkeep
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+dist/
+build/
+*.egg-info/
+
+# Node / uni-app
+node_modules/
+unpackage/
+.hbuilderx/
+*.local
+
+# 构建产物
+frontend/dist/
+client/dist/
+
+# IDE / OS
+.idea/
+.vscode/*
+!.vscode/extensions.json
+.DS_Store

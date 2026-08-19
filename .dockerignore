@@ -1,0 +1,28 @@
+# 让构建上下文尽量小，并且别把密钥带进镜像层。
+.git/
+.github/
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+
+.env
+.env.*
+!.env.example
+
+docs/
+tests/
+node_modules/
+
+# README 是包元数据（pyproject 的 readme 字段），构建后端要读，不能排除。
+*.md
+!README.md
+
+.DS_Store
+.idea/
+.vscode/

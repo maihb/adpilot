@@ -1,0 +1,141 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  UV_VERSION: "0.5.11"
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  quality:
+    name: Lint, types and unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --frozen --all-extras
+
+      - name: Ruff (lint)
+        run: uv run ruff check .
+
+      - name: Ruff (format)
+        run: uv run ruff format --check .
+
+      - name: Mypy
+        run: uv run mypy src tests
+
+      - name: Unit tests
+        run: uv run pytest --cov=adpilot --cov-report=term-missing
+
+  integration:
+    name: Integration tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_DB: adpilot
+          POSTGRES_USER: adpilot
+          POSTGRES_PASSWORD: ci-not-a-secret
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U adpilot -d adpilot"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+
+      mongo:
+        image: mongo:8
+        env:
+          MONGO_INITDB_ROOT_USERNAME: adpilot
+          MONGO_INITDB_ROOT_PASSWORD: ci-not-a-secret
+        ports: ["27017:27017"]
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.adminCommand({ping:1})'"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+
+    env:
+      # 一次性凭据，用于跑完即销毁的 CI 容器，runner 之外根本访问不到。
+      # 真实部署一律从 .env 读。
+      RUN_INTEGRATION: "1"
+      ENVIRONMENT: test
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: adpilot
+      POSTGRES_USER: adpilot
+      POSTGRES_PASSWORD: ci-not-a-secret
+      MONGO_URI: mongodb://adpilot:ci-not-a-secret@localhost:27017/?authSource=admin
+      MONGO_DB: adpilot_raw
+      REDIS_URL: redis://localhost:6379/0
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --frozen --all-extras
+
+      - name: Integration tests
+        run: uv run pytest -m integration
+
+  docker:
+    name: Docker image builds
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      # README 承诺了 `docker compose up` 能跑起来。这句承诺只有在每次推送都被
+      # 机器验一遍时才值钱。
+      - name: Build runtime image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: runtime
+          push: false
+          load: true
+          tags: adpilot:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Container starts and answers liveness
+        run: |
+          docker run -d --name adpilot-ci -p 8000:8000 \
+            -e POSTGRES_PASSWORD=ci-not-a-secret \
+            adpilot:ci
+          for _ in $(seq 1 30); do
+            if curl -fsS http://localhost:8000/api/health/live; then
+              echo "\nliveness OK"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "container never became live"
+          docker logs adpilot-ci
+          exit 1
