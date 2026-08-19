@@ -113,18 +113,27 @@ Then:
 
 ### Working on it
 
-```bash
-uv sync --all-extras          # install (https://docs.astral.sh/uv/)
-uv run uvicorn adpilot.main:app --reload
+The only prerequisite is [uv](https://docs.astral.sh/uv/) — it installs the
+Python interpreter itself, per `.python-version`, so you don't need one upfront:
 
-uv run ruff check . && uv run ruff format --check .
-uv run mypy src tests
-uv run pytest                 # unit tests, no services needed
-RUN_INTEGRATION=1 uv run pytest -m integration   # needs the compose stack
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh   # or brew install uv
 ```
 
-Every one of those commands also runs in CI. A check that is merely recommended
-rots; if it matters here, it fails the build.
+From there `make help` lists everything. The ones you'll actually use:
+
+```bash
+make bootstrap    # new machine, one command: create .env + install from uv.lock
+make dev          # run the API with hot reload
+make check        # run before pushing: all four CI gates in one go
+make test-int     # integration tests, needs the `make up` stack running
+make up / down / logs
+```
+
+make is shorthand, not logic — `make -n <target>` shows exactly what a target
+expands to. The four gates in `make check` match
+[CI](.github/workflows/ci.yml) command for command, in the same order: a check
+that is merely recommended rots; if it matters here, it fails the build.
 
 ## Stack
 

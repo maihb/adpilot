@@ -100,18 +100,26 @@ docker compose up
 
 ### 开发
 
-```bash
-uv sync --all-extras          # 安装依赖（https://docs.astral.sh/uv/）
-uv run uvicorn adpilot.main:app --reload
+只需要装 [uv](https://docs.astral.sh/uv/) —— Python 解释器它会照
+`.python-version` 一起装好，不用预先准备：
 
-uv run ruff check . && uv run ruff format --check .
-uv run mypy src tests
-uv run pytest                 # 单元测试，不需要任何外部服务
-RUN_INTEGRATION=1 uv run pytest -m integration   # 需要 compose 那套环境
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh   # 或 brew install uv
 ```
 
-上面每一条都同时跑在 CI 里。只写在文档里、没有机器执行的检查一定会腐化；
-在这个仓库里，重要的事就得能让构建失败。
+之后 `make help` 是完整清单，常用的是这几条：
+
+```bash
+make bootstrap    # 新机器就跑这一条：生成 .env + 按 uv.lock 装依赖
+make dev          # 起接口服务，热重载
+make check        # 推送前跑这条：CI 卡的四道门禁一次跑完
+make test-int     # 集成测试，需要 make up 那套环境在跑
+make up / down / logs
+```
+
+make 只是短名字，没有额外逻辑 —— 每个 target 展开成什么，`make -n <target>` 一看
+便知。`make check` 的四道门禁与 [CI](.github/workflows/ci.yml) 同序同命令：只写在
+文档里、没有机器执行的检查一定会腐化；在这个仓库里，重要的事就得能让构建失败。
 
 ## 技术栈
 

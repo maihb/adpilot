@@ -492,6 +492,10 @@ def uv_ok(rest: list[str]) -> bool:
         return bool(args) and args[0] in UV_PYTHON_READONLY
     if sub == "lock":
         return any(a in ("--check", "--dry-run") for a in args)
+    # flag 形态的纯查询，永远是读。跟下面的 `version` 子命令别混起来 ——
+    # `uv --version` 只是打印版本号，`uv version 1.2.3` 会改写 pyproject.toml。
+    if sub in ("--version", "-V", "--help", "-h"):
+        return True
     if sub == "version":
         # `uv version 1.2.3` 会改写 pyproject.toml，只有纯查询才是读。
         return all(a.startswith("-") for a in args)

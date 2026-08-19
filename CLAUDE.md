@@ -31,6 +31,7 @@
 | 连接生命周期、`app.state` 里有什么 | `src/adpilot/resources.py` |
 | 接口怎么写 | 先看 `src/adpilot/api/health.py`，再看 `src/adpilot/api/deps.py` |
 | 本地环境、端口、服务凭据 | `docker-compose.yml` + `.env.example` |
+| 新机器上手、有哪些快捷命令（人用，非 agent） | `Makefile`，或 `make help` |
 | CI 到底卡哪些门禁 | `.github/workflows/ci.yml` |
 
 ## 不可协商的规矩
@@ -70,6 +71,7 @@
 | **凭据不进公开历史** | `.gitignore` + 命令守卫拦下 `git add .env` 与 `git add -f`。**挡不住「把密钥粘进代码里」**，那只能靠提交前看一眼 `git diff --staged` |
 | 依赖只经 uv 装 | 守卫拦下 `pip install`，并给出 `uv add` 的写法 |
 | 命令只在项目环境里跑 | 守卫拦下裸 `pytest` / `mypy` / `ruff` / `uvicorn`，提示走 `uv run` |
+| **make 只放已授权的 target** | `settings.json` 逐条精确列出；`Bash(make:*)` 刻意不加 —— target 里能写任意命令，通配一条就等于给守卫开后门。新 target 默认不授权 |
 | 数据卷不被顺手删掉 | 守卫拦下 `docker compose down -v` |
 | **push 要人明确说** | `settings.json` 里 `Bash(git push:*)` 是 deny。用户说「提交」只意味着 commit |
 | 只读命令不该反复弹窗 | 守卫按「拆出每个命令位置的可执行名，全部只读才放行」自动放行，边界写在 [`.claude/bash_guard.py`](.claude/bash_guard.py) 的模块 docstring 里 |
@@ -97,6 +99,14 @@
   两边内容必须一致。
 
 ## 常用命令
+
+[`Makefile`](Makefile) 是同一批命令的短名字（`make help` 看清单），下面是它展开成的
+原命令。两者都能用，但**改了任一边就要同步另一边**。
+
+能跑哪些 make target，`.claude/settings.json` 里**逐条**列着 —— 精确匹配，不是
+`Bash(make:*)` 通配。判据是「展开后的原命令本身已获授权」，所以 make 没有放大权限。
+两个推论：**新加的 target 不会自动获授权**（要用就去 settings.json 补一条），
+**`make env` / `make bootstrap` 刻意不在里面**（碰 `.env`，且跑完要人填密码）。
 
 ```bash
 uv sync --all-extras

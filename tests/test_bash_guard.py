@@ -45,6 +45,11 @@ READONLY_COMMANDS = [
     "rg -n 'raw_reports' src | head -20",
     "wc -l src/adpilot/*.py",
     "uv tree",
+    # flag 形态的版本查询。曾经漏判过：uv_ok() 只认子命令形态的 `uv version`，
+    # 于是 `uv --version` 落回权限系统，把整条复合命令一起拖去弹窗。
+    "uv --version",
+    "uv -V",
+    "uv --help",
     "uv run ruff check .",
     "uv run ruff format --check .",
     "uv run mypy src tests",
@@ -55,6 +60,10 @@ READONLY_COMMANDS = [
     # 复合形态才是这套判定存在的理由：前缀规则对它一律不生效，一律弹窗。
     "git log --format=%H -3 | while read -r h; do git show --stat $h; done",
     "for f in $(git ls-files 'src/**.py'); do wc -l $f; done",
+    # 「uv 装哪了」的实际形态。一条命令里三个判定点：$() 在**参数**位（命令位由
+    # 替换算出来才该落回询问）、2>/dev/null 是丢弃不是写、以及上面那个
+    # `uv --version`。任一处判错，整条就退回弹窗。
+    "which uv; uv --version; ls -la $(which uv) 2>/dev/null",
 ]
 
 
@@ -72,6 +81,8 @@ NOT_READONLY_COMMANDS = [
     "uv sync --all-extras",
     "uv add httpx",
     "uv lock",
+    # 子命令形态带位置参数就是在写 pyproject.toml，跟 `uv --version` 只差两个横杠
+    "uv version 0.2.0",
     "uv run ruff format .",
     "uv run ruff check --fix .",
     "uv run pytest",
