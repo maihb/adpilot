@@ -21,7 +21,7 @@ def create_client(settings: Settings) -> Redis:
     只会让每个调用点都挂一句 `.decode()`。
     """
     return Redis.from_url(
-        settings.redis_url.get_secret_value(),
+        settings.redis_url,
         decode_responses=True,
         socket_connect_timeout=2,
     )

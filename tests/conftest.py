@@ -43,14 +43,21 @@ def offline_settings() -> Settings:
     """指向「没人监听」的端口的配置。
 
     用来证明就绪探针在依赖不可达时能干净降级，而不是卡住或抛异常。
+
+    `_env_file=None` 是必须的：不关掉的话，本机 .env 会把没显式传的字段补上，
+    这个「哪儿都连不上」的场景就未必造得出来 —— 而失败只发生在某些人的机器上。
     """
     return Settings(
+        _env_file=None,
         environment=Environment.TEST,
         postgres_host="127.0.0.1",
         postgres_port=1,
         postgres_password=SecretStr("unused"),
-        mongo_uri=SecretStr("mongodb://127.0.0.1:1"),
-        redis_url=SecretStr("redis://127.0.0.1:1"),
+        mongo_host="127.0.0.1",
+        mongo_port=1,
+        mongo_password=SecretStr("unused"),
+        redis_host="127.0.0.1",
+        redis_port=1,
     )
 
 
