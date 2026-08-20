@@ -6,6 +6,8 @@ from datetime import date
 
 from pydantic import BaseModel, ConfigDict
 
+from adpilot.models.daily_metric import MetricLevel
+
 
 class ImportResponse(BaseModel):
     """一次导入的结果摘要。
@@ -18,6 +20,10 @@ class ImportResponse(BaseModel):
 
     provider: str
     account_id: int
+
+    #: 这份报表的投放层级。它是 `daily_metrics` 唯一键的一部分，回显出来是为了
+    #: 让导入的人当场确认自己填对了 —— 填错不会报错，只会让数据挂到另一个层级上。
+    level: MetricLevel
 
     #: 这份文件覆盖到的自然日（账户时区），升序
     days: list[date]

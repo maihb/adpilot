@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from adpilot.db.mongo import RAW_REPORTS, MongoDatabase
 from adpilot.models.ad_account import AdAccount
+from adpilot.models.daily_metric import MetricLevel
 from adpilot.providers import registry
 from adpilot.providers.base import ParseError
 from adpilot.services.exceptions import InvalidDataError, ReferenceNotFoundError
@@ -35,6 +36,7 @@ class ImportSummary:
 
     provider: str
     account_id: int
+    level: MetricLevel
     days: list[date]
     rows: int
     skipped_rows: int
@@ -47,11 +49,18 @@ async def import_report_file(
     account_id: int,
     provider_name: str,
     content: bytes,
+    level: MetricLevel,
     date_column: str | None = None,
 ) -> ImportSummary:
     """解析一份报表文件，按天落成原始快照。
 
     账户不存在抛 `ReferenceNotFoundError`，文件解析不了抛 `InvalidDataError`。
+
+    🔴 **`level` 是导入时必须给的元数据，不从文件内容推断。** 后台导出「广告系列」
+    层级和「广告」层级，列名不同但都是合法 CSV，推断有很大的猜错空间；而 `level`
+    是 `daily_metrics` 唯一键的一部分 —— 猜错了不会覆盖旧行，而是**新增一份**，
+    于是同一天的花费在汇总时被算了两遍。它记进快照而不是等归一化时再传，是为了
+    重跑时不必有人再记一遍当初导的是什么层级。
     """
     await _ensure_account_exists(session, account_id)
 
@@ -69,6 +78,9 @@ async def import_report_file(
         {
             "provider": provider.name,
             "account_id": account_id,
+            # 存字符串而不是枚举成员：BSON 不认识 Python 枚举，而这份文档要能被
+            # 任何工具（mongosh、导出脚本）直接读懂。
+            "level": level.value,
             # stat_date 存 ISO 字符串而**不是** BSON datetime。BSON 没有「纯日期」
             # 类型，存 datetime 就必须挑一个时刻，而 stat_date 是账户时区下的
             # 自然日、不是时刻 —— 挑 UTC 午夜会诱导下游拿时区去解释它，那正是
@@ -85,6 +97,7 @@ async def import_report_file(
     summary = ImportSummary(
         provider=provider.name,
         account_id=account_id,
+        level=level,
         days=[day.stat_date for day in result.days],
         rows=sum(len(day.rows) for day in result.days),
         skipped_rows=result.skipped_rows,
@@ -93,6 +106,7 @@ async def import_report_file(
         "raw_report_imported",
         provider=summary.provider,
         account_id=account_id,
+        level=level.value,
         days=len(summary.days),
         rows=summary.rows,
         skipped_rows=summary.skipped_rows,

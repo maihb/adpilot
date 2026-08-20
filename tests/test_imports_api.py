@@ -12,7 +12,11 @@ from httpx import AsyncClient
 
 from adpilot.db.mongo import RAW_REPORTS, MongoDatabase
 
-_CSV = b"Day,Campaign,Amount spent (USD)\n2026-08-18,cmp-1,12.34\n2026-08-19,cmp-1,56.78\n"
+_CSV = (
+    b"Day,Campaign ID,Campaign name,Amount spent (USD),Impressions,Link clicks\n"
+    b"2026-08-18,cmp-1,\xe5\xa4\x8f\xe5\xad\xa3\xe6\x96\xb0\xe5\x93\x81,12.34,1000,50\n"
+    b"2026-08-19,cmp-1,\xe5\xa4\x8f\xe5\xad\xa3\xe6\x96\xb0\xe5\x93\x81,56.78,2000,80\n"
+)
 
 
 async def _new_account(api: AsyncClient, suffix: str) -> int:
@@ -39,7 +43,9 @@ def _files(content: bytes = _CSV) -> dict[str, tuple[str, bytes, str]]:
 
 
 def _form(account_id: int, **extra: str) -> dict[str, str]:
-    return {"account_id": str(account_id), **extra}
+    # level 必填且不从文件推断：它是 daily_metrics 唯一键的一部分，填错不会覆盖
+    # 旧行而是新增一份，于是同一天的花费被算两遍。
+    return {"account_id": str(account_id), "level": "campaign", **extra}
 
 
 def test_openapi_declares_the_import_operations(offline_client: TestClient) -> None:
@@ -71,6 +77,7 @@ async def test_import_lands_one_snapshot_per_day(
     assert response.status_code == 201, response.text
     body = response.json()
     assert body["provider"] == "file_csv"
+    assert body["level"] == "campaign"
     assert body["days"] == ["2026-08-18", "2026-08-19"]
     assert body["rows"] == 2
     assert body["skipped_rows"] == 0
@@ -98,10 +105,18 @@ async def test_payload_is_stored_verbatim(
     )
     assert doc is not None
     assert doc["provider"] == "file_csv"
+    assert doc["level"] == "campaign"
     # stat_date 存的是 ISO 字符串不是 datetime：它是账户时区下的自然日、不是时刻
     assert doc["stat_date"] == "2026-08-18"
     assert doc["payload"] == [
-        {"Day": "2026-08-18", "Campaign": "cmp-1", "Amount spent (USD)": "12.34"}
+        {
+            "Day": "2026-08-18",
+            "Campaign ID": "cmp-1",
+            "Campaign name": "夏季新品",
+            "Amount spent (USD)": "12.34",
+            "Impressions": "1000",
+            "Link clicks": "50",
+        }
     ]
 
 
@@ -163,8 +178,8 @@ async def test_unknown_provider_is_rejected(live_api: AsyncClient) -> None:
 
     response = await live_api.post(
         "/api/imports",
-        files={"file": ("report.csv", _CSV, "text/csv")},
-        data={"account_id": str(account_id), "provider": "meta_api"},
+        files=_files(),
+        data=_form(account_id, provider="meta_api"),
     )
 
     assert response.status_code == 422

@@ -8,6 +8,7 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
 
 from adpilot.api.deps import MongoDep, SessionDep
 from adpilot.api.errors import responses
+from adpilot.models.daily_metric import MetricLevel
 from adpilot.providers import registry
 from adpilot.schemas.imports import ImportResponse
 from adpilot.services import imports as imports_service
@@ -35,6 +36,10 @@ async def import_report_file(
     mongo: MongoDep,
     account_id: Annotated[int, Form(description="快照归属的广告账户")],
     file: Annotated[UploadFile, File(description="平台后台导出的报表文件")],
+    level: Annotated[
+        MetricLevel,
+        Form(description="这份报表是哪个投放层级的。导出时选的是什么就填什么"),
+    ],
     provider: Annotated[
         str,
         Form(description="数据源适配器；目前只有 file_csv"),
@@ -65,6 +70,7 @@ async def import_report_file(
         account_id=account_id,
         provider_name=provider,
         content=await file.read(),
+        level=level,
         date_column=date_column,
     )
     return ImportResponse.model_validate(summary)
