@@ -27,6 +27,7 @@
 | 领域 | tag | 覆盖什么 | 代码 | 状态 |
 |---|---|---|---|---|
 | [glossary](glossary.md) | — | 术语、指标口径、时区、回填与重述、规则公式 | `rules/` | ✅ 口径已定；余额那两个参数已按倾向值实现，仍待业务定论 |
+| [认证与作用域](auth.md) | `auth` | 两种身份、token 的签发与校验、运营登录、有效期与续期 | `auth/` `api/auth.py` `api/deps.py` | ✅ D9：内部接口已全部要认证；客户端那半边随 `portal` 一起 |
 | [客户与账户](clients.md) | `clients` | 客户、广告账户（平台/币种/**时区**）、账户与客户的归属 | `client.py` `ad_account.py`（model / schema / service / api 四层同名） | ✅ D3：建、查、改与分页已落地，无删除 |
 | [数据接入](imports.md) | `imports` | `ReportProvider` 适配器注册表、文件导入、原始快照落盘 | `providers/` `services/imports.py` | ✅ D3：CSV 导入与 append-only 落盘已通，Excel 与拉取调度未做 |
 | [日指标](metrics.md) | `metrics` | 平台字段 → 统一口径、唯一键 upsert、按天查询与派生指标 | `services/field_maps.py` `services/normalize.py` `services/daily_metric.py` | ✅ D3–D5：归一化与按天查询已通；聚合与环比未做 |

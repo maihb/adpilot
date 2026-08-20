@@ -16,6 +16,7 @@ import structlog
 from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
 
+from adpilot.auth.token import AuthNotConfiguredError, InvalidTokenError
 from adpilot.schemas.errors import ErrorResponse
 from adpilot.services.exceptions import (
     ConflictError,
@@ -26,6 +27,11 @@ from adpilot.services.exceptions import (
 )
 
 log = structlog.get_logger(__name__)
+
+# 401 的响应体**固定是这一句**，不透露到底是没带 token、签名不对、过期了，还是
+# 拿错了门。区分等于告诉攻击者他走到了哪一步；而对合法用户来说这几种情况的处置
+# 完全一样：重新登录。理由与 `auth/token.py` 只有一个 `InvalidTokenError` 同源。
+_UNAUTHORIZED_DETAIL: Final = "认证失败，请重新登录"
 
 # 精确按类型查，**不沿继承链回退** —— 新加的异常必须自己登记一行，而不是默默
 # 继承父类的状态码。继承来的码通常是错的：ReferenceNotFoundError 若跟着
@@ -51,13 +57,45 @@ async def _handle_domain_error(request: Request, exc: Exception) -> JSONResponse
     return JSONResponse(status_code=status_code, content={"detail": exc.message})
 
 
-def install_error_handlers(app: FastAPI) -> None:
-    """把领域异常的处理器挂到应用上。
+async def _handle_invalid_token(request: Request, exc: Exception) -> JSONResponse:
+    """token 不可信 → 401，**响应体不说是哪一种不可信**。
 
-    只注册基类：Starlette 查处理器时会沿异常的 MRO 往上找，所以全部子类都会
-    落到这里，再由上面那张表分派具体状态码。
+    `WWW-Authenticate` 不是可有可无的礼节：没有它，401 在规范上是不完整的，
+    而 HTTP 客户端（含小程序侧的封装）常据此决定要不要走重新认证的流程。
+    """
+    return JSONResponse(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        content={"detail": _UNAUTHORIZED_DETAIL},
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+
+async def _handle_auth_not_configured(request: Request, exc: Exception) -> JSONResponse:
+    """没配 `AUTH_SECRET` → 503，且**说清缺了什么**。
+
+    这与上面那条正相反：它是部署方的问题，不是调用方的问题。回 401 会让人对着
+    一个永远进不去的登录框试半天密码。这句话里没有任何敏感内容 —— 缺哪个环境
+    变量，`.env.example` 里本来就写着。
+    """
+    log.error("auth_not_configured")
+    return JSONResponse(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        content={"detail": "服务端未配置 AUTH_SECRET，认证不可用"},
+    )
+
+
+def install_error_handlers(app: FastAPI) -> None:
+    """把领域异常与认证异常的处理器挂到应用上。
+
+    领域异常只注册基类：Starlette 查处理器时会沿异常的 MRO 往上找，所以全部子类
+    都会落到那里，再由上面那张表分派具体状态码。
+
+    认证那两个**不进 `_STATUS_BY_EXCEPTION` 那张表**：它们不是 `DomainError`
+    —— `auth/` 在分层图上够不着 `services/`，两族异常从定义上就分属两层。
     """
     app.add_exception_handler(DomainError, _handle_domain_error)
+    app.add_exception_handler(InvalidTokenError, _handle_invalid_token)
+    app.add_exception_handler(AuthNotConfiguredError, _handle_auth_not_configured)
 
 
 def responses(*codes: int) -> dict[int | str, dict[str, Any]]:
@@ -67,9 +105,11 @@ def responses(*codes: int) -> dict[int | str, dict[str, Any]]:
     客户端会以为这个接口只可能成功 —— 而错误分支恰恰是最需要类型的地方。
     """
     described = {
+        status.HTTP_401_UNAUTHORIZED: "没带 token、token 无效或已过期",
         status.HTTP_404_NOT_FOUND: "资源不存在",
         status.HTTP_409_CONFLICT: "与已有数据冲突",
         status.HTTP_413_CONTENT_TOO_LARGE: "上传的文件超过大小上限",
         status.HTTP_422_UNPROCESSABLE_CONTENT: "入参不合法，或引用了不存在的对象",
+        status.HTTP_503_SERVICE_UNAVAILABLE: "服务端未配置认证",
     }
     return {code: {"model": ErrorResponse, "description": described[code]} for code in codes}

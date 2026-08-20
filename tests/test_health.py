@@ -5,6 +5,9 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
+from adpilot.config import Environment, Settings
+from adpilot.main import create_app
+
 
 def test_liveness_ignores_backing_services(offline_client: TestClient) -> None:
     """所有依赖都挂着时，存活探针仍必须是绿的。
@@ -54,6 +57,21 @@ def test_openapi_schema_is_generated(offline_client: TestClient) -> None:
     schema = response.json()
     assert schema["info"]["title"] == "adpilot"
     assert "/api/health/ready" in schema["paths"]
+
+
+def test_production_hides_the_schema_and_the_docs(offline_settings: Settings) -> None:
+    """生产环境关掉 `/docs` 和 `/openapi.json`，**但探针照常开着**。
+
+    关掉不是指望靠它藏住什么 —— 仓库是公开的，接口清单本来就在源码里。关掉的是
+    一个免认证、能一次性枚举出全部路由与出入参形状的入口。前端的类型生成读的是
+    本地或 CI 起的非生产实例，不受影响。
+    """
+    production = offline_settings.model_copy(update={"environment": Environment.PROD})
+
+    with TestClient(create_app(production)) as client:
+        assert client.get("/openapi.json").status_code == 404
+        assert client.get("/docs").status_code == 404
+        assert client.get("/api/health/live").status_code == 200
 
 
 @pytest.mark.integration

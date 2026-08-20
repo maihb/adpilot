@@ -14,6 +14,7 @@ from __future__ import annotations
 import os
 from collections.abc import AsyncIterator, Iterator
 from datetime import UTC, datetime
+from functools import lru_cache
 
 import pytest
 from celery import Celery
@@ -24,12 +25,36 @@ from pydantic import SecretStr
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from adpilot.api.deps import get_celery, get_mongo, get_session, get_settings
+from adpilot.auth.password import hash_password
+from adpilot.auth.token import Scope, issue
 from adpilot.config import Environment, Settings
 from adpilot.db import broker
 from adpilot.db import mongo as mongo_db
 from adpilot.db.mongo import RAW_REPORTS, MongoDatabase
 from adpilot.db.postgres import create_engine
 from adpilot.main import create_app
+
+# 测试用的假凭据，不是任何地方的真实值（同 test_config.py 的 TRICKY）。
+# **两套夹具都显式传这几个**，不从环境变量取 —— 否则这组测试的结果会取决于跑它
+# 的那台机器 .env 里填了什么密码，而集成测试在 CI 上根本没有那份 .env。
+TEST_AUTH_SECRET = "test-not-a-secret-0123456789abcdef"
+TEST_OPERATOR_USERNAME = "test-operator"
+TEST_OPERATOR_PASSWORD = "test-not-a-secret-password"
+
+
+@lru_cache(maxsize=1)
+def test_password_hash() -> str:
+    """argon2 一次要几十毫秒（故意的），算一次全套测试共用。"""
+    return hash_password(TEST_OPERATOR_PASSWORD)
+
+
+def operator_token_for(settings: Settings) -> str:
+    token, _ = issue(
+        settings.auth_secret,
+        scope=Scope.OPERATOR,
+        sub=settings.operator_username,
+    )
+    return token
 
 
 def pytest_collection_modifyitems(
@@ -73,6 +98,9 @@ def offline_settings() -> Settings:
         rabbitmq_host="127.0.0.1",
         rabbitmq_port=1,
         rabbitmq_password=SecretStr("unused"),
+        auth_secret=SecretStr(TEST_AUTH_SECRET),
+        operator_username=TEST_OPERATOR_USERNAME,
+        operator_password_hash=SecretStr(test_password_hash()),
     )
 
 
@@ -82,16 +110,48 @@ def offline_app(offline_settings: Settings) -> FastAPI:
 
 
 @pytest.fixture
-def offline_client(offline_app: FastAPI) -> Iterator[TestClient]:
-    """所有后端服务都连不上的测试客户端。"""
+def offline_client(offline_app: FastAPI, offline_settings: Settings) -> Iterator[TestClient]:
+    """所有后端服务都连不上、但**已经带着运营 token** 的测试客户端。
+
+    默认带上认证是刻意的：这组用例验的是接口契约（入参校验、OpenAPI 形状、
+    分页边界），认证只是它们的前置条件。让每条用例自己去登录一次，只会把
+    「这条测的是什么」淹掉。**验认证本身**用下面的 `anonymous_client`。
+    """
+    token = operator_token_for(offline_settings)
+    with TestClient(offline_app, headers={"Authorization": f"Bearer {token}"}) as client:
+        yield client
+
+
+@pytest.fixture
+def anonymous_client(offline_app: FastAPI) -> Iterator[TestClient]:
+    """不带任何 token 的客户端，用来验「没认证会被拦住」。"""
     with TestClient(offline_app) as client:
         yield client
 
 
 @pytest.fixture
+def operator_password() -> str:
+    """上面两个 settings 夹具里那个运营账号的**明文**密码。
+
+    做成夹具而不是让用例 `from tests.conftest import ...` —— `tests/` 不是包，
+    那条 import 在 pytest 之外（比如 mypy）解析不了。
+    """
+    return TEST_OPERATOR_PASSWORD
+
+
+@pytest.fixture
 def live_settings() -> Settings:
-    """从环境变量读取的配置，供集成测试使用。"""
-    return Settings(environment=Environment.TEST)
+    """从环境变量读取的配置，供集成测试使用。
+
+    认证那三项**不从环境变量取**（见文件顶部）：CI 的集成 job 没有 .env，而本机
+    的 .env 里填的是使用者自己的真实密码 —— 集成测试不该依赖它，更不该需要它。
+    """
+    return Settings(
+        environment=Environment.TEST,
+        auth_secret=SecretStr(TEST_AUTH_SECRET),
+        operator_username=TEST_OPERATOR_USERNAME,
+        operator_password_hash=SecretStr(test_password_hash()),
+    )
 
 
 @pytest.fixture
@@ -201,5 +261,7 @@ async def live_api(
     async with AsyncClient(
         transport=ASGITransport(app=app),
         base_url="http://test",
+        # 同 `offline_client`：默认带运营 token，让用例只写它自己要验的东西。
+        headers={"Authorization": f"Bearer {operator_token_for(live_settings)}"},
     ) as api:
         yield api
