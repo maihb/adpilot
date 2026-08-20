@@ -7,6 +7,7 @@ PostgreSQL 存的是需要事务和 JOIN 的事实：客户、广告账户、归
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 from sqlalchemy import MetaData
 from sqlalchemy.ext.asyncio import (
@@ -88,6 +89,9 @@ async def session_scope(
 
     业务代码一律不手写事务，全走这个 scope —— 「某个分支忘了回滚」这种事
     从机制上就不会发生。
+
+    这是**生成器**形态，给 FastAPI 的 `Depends` 用（它会在响应发出后把生成器驱动
+    到底，`commit()` 才跑得到）。自己写循环的调用方用下面那个 `transaction`。
     """
     async with factory() as session:
         try:
@@ -96,3 +100,13 @@ async def session_scope(
         except Exception:
             await session.rollback()
             raise
+
+
+# 🔴 同一个 scope 的 `async with` 形态，给没有依赖注入机制的调用方（Celery 任务）用。
+#
+# **不要自己写 `async for session in session_scope(...): return ...`。** 在
+# `async for` 里 return 会让生成器在 `yield` 那一行收到 `GeneratorExit`，而
+# `GeneratorExit` 继承的是 `BaseException` —— 上面那个 `except Exception` 接不住它，
+# `commit()` 也永远跑不到。结果是事务被静默丢弃：接口测试全绿（用的是 Depends 那条
+# 路径），任务写的数据却一行都没落地。
+transaction = asynccontextmanager(session_scope)

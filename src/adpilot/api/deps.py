@@ -9,6 +9,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from typing import Annotated
 
+from celery import Celery
 from fastapi import Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -47,7 +48,17 @@ def get_mongo(resources: Annotated[Resources, Depends(get_resources)]) -> MongoD
     return resources.mongo_db
 
 
+def get_celery(resources: Annotated[Resources, Depends(get_resources)]) -> Celery:
+    """任务队列的**生产者**句柄。
+
+    接口进程只投递、不消费，也不 import 任何任务代码 —— 任务按名字发，名字常量在
+    `db/broker.py`。消费那一侧是 `adpilot.tasks` 和另一个进程的事。
+    """
+    return resources.celery
+
+
 ResourcesDep = Annotated[Resources, Depends(get_resources)]
 SettingsDep = Annotated[Settings, Depends(get_settings)]
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 MongoDep = Annotated[MongoDatabase, Depends(get_mongo)]
+CeleryDep = Annotated[Celery, Depends(get_celery)]

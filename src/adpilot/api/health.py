@@ -18,6 +18,7 @@ from pydantic import BaseModel
 from sqlalchemy import text
 
 from adpilot.api.deps import ResourcesDep
+from adpilot.db import broker
 from adpilot.resources import Resources
 
 router = APIRouter(tags=["health"])
@@ -67,6 +68,17 @@ async def _probe_redis(resources: Resources) -> DependencyStatus:
     return DependencyStatus(name="redis", healthy=True)
 
 
+async def _probe_broker(resources: Resources) -> DependencyStatus:
+    """探 RabbitMQ。
+
+    kombu 没有 async 接口，所以走线程池。⚠️ `asyncio.to_thread` 起的线程**取消不了**
+    —— 上面那个 `wait_for` 超时后它还在跑，所以 `check_connection` 自己也带了一个
+    短超时，不然每次探测都会留下一个要等几十秒才散的线程。
+    """
+    await asyncio.to_thread(broker.check_connection, resources.celery)
+    return DependencyStatus(name="rabbitmq", healthy=True)
+
+
 async def _run_probe(
     name: str,
     coro: Coroutine[Any, Any, DependencyStatus],
@@ -105,6 +117,7 @@ async def ready(resources: ResourcesDep, response: Response) -> ReadinessRespons
         _run_probe("postgres", _probe_postgres(resources)),
         _run_probe("mongodb", _probe_mongo(resources)),
         _run_probe("redis", _probe_redis(resources)),
+        _run_probe("rabbitmq", _probe_broker(resources)),
     )
 
     all_healthy = all(dep.healthy for dep in dependencies)

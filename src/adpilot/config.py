@@ -7,13 +7,13 @@
 2. **凭据一律用 `SecretStr`。** 它们不会因为一次日志、一次异常栈或一次
    `repr()` 意外泄出来；要读必须显式调 `.get_secret_value()`，review 时
    一 grep 就能找全。
-3. **连接串一律由零件拼，不收整条 URI。** 三个库都是 `*_HOST` / `*_PORT` /
+3. **连接串一律由零件拼，不收整条 URI。** 四个外部系统都是 `*_HOST` / `*_PORT` /
    账号密码进来，DSN 由下面的 property 拼出去。收整条 URI 的代价是同一个事实
    有两处真相：`MONGO_PORT` 和 `MONGO_URI` 里的端口迟早会不一致，而症状是
    「compose 里跑得好好的，本机连到别的服务上去了」—— 一个不会报错、只会给出
    奇怪结果的失败。
 
-⚠️ 拼出来的那三个连接串**里面带着明文密码**（驱动只认这个形态）。它们只喂给
+⚠️ 拼出来的那几个连接串**里面带着明文密码**（驱动只认这个形态）。它们只喂给
 驱动，不要记进日志、不要放进异常消息 —— `SecretStr` 到这一步就保护不了了。
 """
 
@@ -84,9 +84,22 @@ class Settings(BaseSettings):
     redis_host: str = "localhost"
     redis_port: int = 6379
     redis_db: int = 0
+    # Celery 的任务结果存在**另一个** db 号里，与缓存分开。理由是清缓存这件事迟早
+    # 会发生（`FLUSHDB`），而它不该顺手把「那个任务到底成没成」一起清掉 —— 任务
+    # 结果是给人查故障用的，缓存丢了自己会长回来。
+    redis_celery_db: int = 1
     # Redis 这一项**空着是正常状态**，不是「凭据缺了个默认值」：compose 里的
     # Redis 只在内网监听、没开 requirepass。真给它配了密码就填在这里。
     redis_password: SecretStr = Field(default=SecretStr(""))
+
+    # --- RabbitMQ：Celery 的消息 broker ---
+    rabbitmq_host: str = "localhost"
+    rabbitmq_port: int = 5672
+    rabbitmq_user: str = "adpilot"
+    rabbitmq_password: SecretStr = Field(default=SecretStr(""))
+    # vhost 是 RabbitMQ 侧的命名空间。自己起的那台用默认的 `/` 就行；连一个别人
+    # 已经在用的 RabbitMQ 时必须换一个，否则两个系统的队列名会在同一个空间里撞。
+    rabbitmq_vhost: str = "/"
 
     @property
     def postgres_dsn(self) -> str:
@@ -123,14 +136,37 @@ class Settings(BaseSettings):
 
     @property
     def redis_url(self) -> str:
-        """Redis 连接串。
+        """Redis 连接串（缓存与限流用的那个 db）。
 
         没配密码就不带认证段 —— 拼一个空的 `:@` 上去，客户端会真的发一次
         AUTH，然后被一台没开认证的 Redis 拒掉。
         """
+        return self._redis_url(self.redis_db)
+
+    @property
+    def celery_result_backend(self) -> str:
+        """Celery 存任务结果的地方，与缓存**不同一个 db**（见 `redis_celery_db`）。"""
+        return self._redis_url(self.redis_celery_db)
+
+    def _redis_url(self, db: int) -> str:
         password = self.redis_password.get_secret_value()
         credentials = f":{quote(password, safe='')}@" if password else ""
-        return f"redis://{credentials}{self.redis_host}:{self.redis_port}/{self.redis_db}"
+        return f"redis://{credentials}{self.redis_host}:{self.redis_port}/{db}"
+
+    @property
+    def celery_broker_url(self) -> str:
+        """RabbitMQ 连接串。
+
+        🔴 **vhost 必须 percent-encode。** 默认 vhost 就叫 `/`，直接拼进路径的话
+        `amqp://u:p@host:5672//` 还能歪打正着，但换成任何带斜杠的 vhost 就会被
+        urlparse 从那里切开，连到一个不存在的 vhost 上 —— 症状是 kombu 报
+        `ACCESS_REFUSED`，而报错里不会提斜杠半个字。编码成 `%2F` 之后 kombu 会
+        原样解回来（`kombu.utils.url.parse_url` 做 unquote）。
+        """
+        return (
+            f"amqp://{_credentials(self.rabbitmq_user, self.rabbitmq_password)}"
+            f"{self.rabbitmq_host}:{self.rabbitmq_port}/{quote(self.rabbitmq_vhost, safe='')}"
+        )
 
     @property
     def is_production(self) -> bool:

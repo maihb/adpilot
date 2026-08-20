@@ -29,7 +29,7 @@ def test_readiness_reports_503_when_dependencies_are_down(
     assert body["status"] == "degraded"
 
     reported = {dep["name"] for dep in body["dependencies"]}
-    assert reported == {"postgres", "mongodb", "redis"}
+    assert reported == {"postgres", "mongodb", "redis", "rabbitmq"}
     assert all(dep["healthy"] is False for dep in body["dependencies"])
 
 
@@ -58,7 +58,7 @@ def test_openapi_schema_is_generated(offline_client: TestClient) -> None:
 
 @pytest.mark.integration
 def test_readiness_is_green_against_real_services(live_client: TestClient) -> None:
-    """PostgreSQL / MongoDB / Redis 真的起着时，就绪探针应报 ready。"""
+    """PostgreSQL / MongoDB / Redis / RabbitMQ 真的起着时，就绪探针应报 ready。"""
     response = live_client.get("/api/health/ready")
 
     assert response.status_code == 200, response.text

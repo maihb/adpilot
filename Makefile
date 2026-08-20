@@ -26,7 +26,7 @@ COMPOSE ?= docker compose
 
 .DEFAULT_GOAL := help
 
-.PHONY: help bootstrap env setup dev lint fmt types imports test test-int check migrate revision up down logs ps
+.PHONY: help bootstrap env setup dev worker lint fmt types imports test test-int check migrate revision up down logs ps
 
 help: ## 显示这份清单
 	@awk 'BEGIN {FS = ":.*##"} \
@@ -40,8 +40,9 @@ bootstrap: env setup ## 生成 .env + 装依赖（新电脑就跑这一条）
 	@echo ""
 	@echo "接下来："
 	@echo "  1. 把 .env 里空着的密码填上（openssl rand -base64 24 生成一个）"
-	@echo "  2. make up    起 PostgreSQL / MongoDB / Redis / RabbitMQ"
-	@echo "  3. make dev   起热重载的接口服务"
+	@echo "  2. make up      起 PostgreSQL / MongoDB / Redis / RabbitMQ"
+	@echo "  3. make dev     起热重载的接口服务"
+	@echo "  4. make worker  另开一个终端，起 Celery worker"
 
 env: ## 从 .env.example 生成 .env（已存在就不动它）
 	@if [ -f .env ]; then \
@@ -62,6 +63,18 @@ setup: ## 按 uv.lock 装依赖（含 dev）
 # migrations/ 乃至 .claude/ 下的钩子脚本都会白重启一次，每次都要重连三个后端。
 dev: ## 起接口服务，热重载（依赖得先 make up）
 	$(UV) run uvicorn adpilot.main:app --reload --reload-dir src
+
+# 三个参数一个都不能省，理由各不相同：
+#
+#   -Q adpilot         不指定队列的话 Celery 去消费名为 celery 的默认队列，而任务
+#                      全投在 adpilot 上 —— worker 安静地跑着、一条消息都不处理。
+#   --without-mingle   这两步会创建「非持久 + 非独占」的队列，RabbitMQ 4 默认拒绝
+#   --without-gossip   （废弃特性 transient_nonexcl_queues），worker 会疯狂重连后
+#                      死在 RestartFreqExceeded 上。它们是命令行开关、进不了配置，
+#                      所以只能写在这里 —— db/broker.py 那段注释是完整解释。
+worker: ## 起 Celery worker，消费 adpilot 队列（依赖得先 make up）
+	$(UV) run celery -A adpilot.tasks.app worker --loglevel=info -Q adpilot \
+		--without-mingle --without-gossip
 
 fmt: ## 就地格式化 + 自动修可修的 lint（会改文件）
 	$(UV) run ruff format .

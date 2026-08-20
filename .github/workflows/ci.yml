@@ -80,6 +80,16 @@ jobs:
           --health-cmd "redis-cli ping"
           --health-interval 5s --health-timeout 3s --health-retries 10
 
+      rabbitmq:
+        image: rabbitmq:4-management-alpine
+        env:
+          RABBITMQ_DEFAULT_USER: adpilot
+          RABBITMQ_DEFAULT_PASS: ci-not-a-secret
+        ports: ["5672:5672"]
+        options: >-
+          --health-cmd "rabbitmq-diagnostics -q check_running"
+          --health-interval 10s --health-timeout 5s --health-retries 10
+
     env:
       # 一次性凭据，用于跑完即销毁的 CI 容器，runner 之外根本访问不到。
       # 真实部署一律从 .env 读。
@@ -97,6 +107,10 @@ jobs:
       MONGO_DB: adpilot_raw
       REDIS_HOST: localhost
       REDIS_PORT: "6379"
+      RABBITMQ_HOST: localhost
+      RABBITMQ_PORT: "5672"
+      RABBITMQ_USER: adpilot
+      RABBITMQ_PASSWORD: ci-not-a-secret
 
     steps:
       - uses: actions/checkout@v4

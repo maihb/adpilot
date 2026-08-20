@@ -16,7 +16,7 @@ from datetime import date
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import Select, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -43,6 +43,17 @@ async def _account(session: AsyncSession, external_id: str) -> AdAccount:
     session.add(account)
     await session.flush()
     return account
+
+
+def _metrics_of(account: AdAccount) -> Select[tuple[DailyMetric]]:
+    """只查这个账户的行。
+
+    **别写成裸的 `select(DailyMetric)`。** 用例之间靠外层事务回滚隔离，但开发机上
+    那个库里往往躺着手工试出来的数据 —— 不带条件的话 `scalar_one()` 会撞上
+    `MultipleResultsFound`，而报错跟这条用例要验的事情毫无关系。CI 的库是空的，
+    所以这种失败只在别人的机器上出现。
+    """
+    return select(DailyMetric).where(DailyMetric.account_id == account.id)
 
 
 def _metric(account_id: int, **overrides: object) -> DailyMetric:
@@ -74,7 +85,7 @@ async def test_money_survives_the_round_trip(live_session: AsyncSession) -> None
 
     # 必须把 identity map 清掉再查，否则读到的是内存里那个对象，根本没经过库
     live_session.expunge_all()
-    stored = (await live_session.execute(select(DailyMetric))).scalar_one()
+    stored = (await live_session.execute(_metrics_of(account))).scalar_one()
 
     assert stored.spend == Decimal("1234.5678")
     assert stored.revenue == Decimal("98765.4321")
@@ -92,7 +103,7 @@ async def test_excess_precision_is_rounded_not_rejected(live_session: AsyncSessi
     await live_session.flush()
 
     live_session.expunge_all()
-    stored = (await live_session.execute(select(DailyMetric))).scalar_one()
+    stored = (await live_session.execute(_metrics_of(account))).scalar_one()
 
     assert stored.spend == Decimal("10.0001")  # 截断的话会是 10.0000
 
@@ -122,7 +133,7 @@ async def test_level_differs_from_object_id_in_the_unique_key(live_session: Asyn
     live_session.add(_metric(account.id, level=MetricLevel.CAMPAIGN, object_id="cmp-1"))
     await live_session.flush()
 
-    rows = (await live_session.execute(select(DailyMetric))).scalars().all()
+    rows = (await live_session.execute(_metrics_of(account))).scalars().all()
     assert len(rows) == 2
 
 
@@ -137,8 +148,10 @@ async def test_enum_columns_read_back_as_enum_members(live_session: AsyncSession
     await live_session.flush()
 
     live_session.expunge_all()
-    stored = (await live_session.execute(select(DailyMetric))).scalar_one()
-    account_back = (await live_session.execute(select(AdAccount))).scalar_one()
+    stored = (await live_session.execute(_metrics_of(account))).scalar_one()
+    account_back = (
+        await live_session.execute(select(AdAccount).where(AdAccount.id == account.id))
+    ).scalar_one()
 
     assert stored.level is MetricLevel.ADGROUP
     assert account_back.platform is Platform.TIKTOK

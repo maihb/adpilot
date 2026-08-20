@@ -8,6 +8,7 @@
       "Bash(make help)",
       "Bash(make setup)",
       "Bash(make dev)",
+      "Bash(make worker)",
       "Bash(make fmt)",
       "Bash(make lint)",
       "Bash(make types)",
@@ -38,6 +39,7 @@
       "Bash(uv run lint-imports:*)",
       "Bash(uv run alembic:*)",
       "Bash(uv run uvicorn:*)",
+      "Bash(uv run celery -A adpilot.tasks.app worker:*)",
       "Bash(uv run python -c:*)",
       "Bash(RUN_INTEGRATION=1 uv run pytest:*)",
 

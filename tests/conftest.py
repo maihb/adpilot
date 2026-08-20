@@ -16,14 +16,16 @@ from collections.abc import AsyncIterator, Iterator
 from datetime import UTC, datetime
 
 import pytest
+from celery import Celery
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from httpx import ASGITransport, AsyncClient
 from pydantic import SecretStr
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from adpilot.api.deps import get_mongo, get_session
+from adpilot.api.deps import get_celery, get_mongo, get_session
 from adpilot.config import Environment, Settings
+from adpilot.db import broker
 from adpilot.db import mongo as mongo_db
 from adpilot.db.mongo import RAW_REPORTS, MongoDatabase
 from adpilot.db.postgres import create_engine
@@ -51,6 +53,11 @@ def offline_settings() -> Settings:
 
     `_env_file=None` 是必须的：不关掉的话，本机 .env 会把没显式传的字段补上，
     这个「哪儿都连不上」的场景就未必造得出来 —— 而失败只发生在某些人的机器上。
+
+    🔴 **加了新的外部系统就要在这里补上它的 host / port。** 漏了的话它会落到
+    `Settings` 的默认值（`localhost` + 官方端口），然后连上开发机上真的跑着的那个
+    服务 —— 于是这个「哪儿都连不上」的夹具悄悄地连上了一个，而症状是别人的机器上
+    测试挂了。
     """
     return Settings(
         _env_file=None,
@@ -63,6 +70,9 @@ def offline_settings() -> Settings:
         mongo_password=SecretStr("unused"),
         redis_host="127.0.0.1",
         redis_port=1,
+        rabbitmq_host="127.0.0.1",
+        rabbitmq_port=1,
+        rabbitmq_password=SecretStr("unused"),
     )
 
 
@@ -141,10 +151,30 @@ async def live_mongo(live_settings: Settings) -> AsyncIterator[MongoDatabase]:
 
 
 @pytest.fixture
+def memory_celery(live_settings: Settings) -> Iterator[Celery]:
+    """投递到进程内存里的任务队列。
+
+    用于「接口投递了任务」这类断言：`send_task` 照常返回任务 ID，但消息不会真的
+    进 RabbitMQ。**这不是嫌真 broker 慢** —— 用例结束时 PostgreSQL 那边整体回滚，
+    真投出去的消息却留在队列里，等哪天有 worker 起来消费，它就会对着一个已经不存在
+    的账户报错，然后堆进死信队列。测试不该在共享的队列里留垃圾。
+
+    broker 那条链路本身由 `test_tasks.py` 里的集成用例验，那边发完自己收回来。
+    """
+    app = broker.create_celery_app(live_settings)
+    app.conf.update(broker_url="memory://")
+    try:
+        yield app
+    finally:
+        app.close()
+
+
+@pytest.fixture
 async def live_api(
     live_settings: Settings,
     live_session: AsyncSession,
     live_mongo: MongoDatabase,
+    memory_celery: Celery,
 ) -> AsyncIterator[AsyncClient]:
     """打真实数据库、但用例结束整体回滚的 HTTP 客户端。
 
@@ -164,6 +194,7 @@ async def live_api(
     app = create_app(live_settings)
     app.dependency_overrides[get_session] = lambda: live_session
     app.dependency_overrides[get_mongo] = lambda: live_mongo
+    app.dependency_overrides[get_celery] = lambda: memory_celery
     async with AsyncClient(
         transport=ASGITransport(app=app),
         base_url="http://test",

@@ -129,6 +129,7 @@ From there `make help` lists everything. The ones you'll actually use:
 ```bash
 make bootstrap    # new machine, one command: create .env + install from uv.lock
 make dev          # run the API with hot reload
+make worker       # in a second terminal: run the Celery worker on the adpilot queue
 make check        # run before pushing: all four CI gates in one go
 make migrate      # bring the database up to the latest schema
 make revision m='add column xxx'   # draft a migration after editing models/ — **review it before committing**
@@ -159,8 +160,8 @@ that is merely recommended rots; if it matters here, it fails the build.
 | Milestone | Scope | Done when | Status |
 |---|---|---|---|
 | D1–D2 | Skeleton, compose stack, CI | `docker compose up` works, CI green | ✅ |
-| D3–D5 | Domain model, file import, REST API | Import a CSV, query normalised daily metrics | ⬜ |
-| D6–D8 | Celery + RabbitMQ, Mongo snapshots, rule engine | Tasks run async with retries; balance alert fires | ⬜ |
+| D3–D5 | Domain model, file import, REST API | Import a CSV, query normalised daily metrics | ✅ |
+| D6–D8 | Celery + RabbitMQ, Mongo snapshots, rule engine | Tasks run async with retries; balance alert fires | 🟡 queue and retries done, rule engine pending |
 | D9–D11 | uni-app client | Mini Program and H5 both running | ⬜ |
 | D12–D13 | LLM reports and diagnosis | Report carries the one line of plain English that matters | ⬜ |
 | D14 | Docs, screenshots, deploy | A stranger can run it within five minutes | ⬜ |

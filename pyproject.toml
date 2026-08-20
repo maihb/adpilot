@@ -20,6 +20,7 @@ dependencies = [
     "structlog>=24.4",
     "alembic>=1.19.1",
     "python-multipart>=0.0.32",
+    "celery>=5.4",
 ]
 
 [project.optional-dependencies]
@@ -31,6 +32,7 @@ dev = [
     "pytest-cov>=6.0",
     "httpx>=0.28",
     "import-linter>=2.13",
+    "celery-types>=0.22",
 ]
 
 [project.urls]
@@ -124,18 +126,25 @@ type = "layers"
 # 模块清单去比对「有没有漏列的」。
 containers = ["adpilot"]
 # exhaustive：adpilot 下新增的顶层模块必须在这张表里有位置，否则契约本身就红。
-# 这条是刻意的 —— providers / rules / llm / tasks 都还没建，建的那天要先想清楚
-# 它们摆在哪一层，而不是等依赖绕成一团之后再来考古。
+# 这条是刻意的 —— rules / llm 都还没建，建的那天要先想清楚它们摆在哪一层，
+# 而不是等依赖绕成一团之后再来考古。
 exhaustive = true
 layers = [
     "main",
-    "api",
+    # 同层用 | 分隔，契约会额外验证它们**互不 import**。
+    #
+    # api 和 tasks 是两个平级的入口：一个由 HTTP 请求驱动，一个由 RabbitMQ 里的
+    # 消息驱动，共用下面的 services。它们互不 import 不是洁癖 —— tasks 认识 api
+    # 就意味着 worker 里出现了请求对象，api 认识 tasks 就意味着 Web 进程要装齐
+    # worker 那一侧的东西。接口投递任务走的是 `Celery.send_task` 按名字发，
+    # 名字常量在 db/broker.py（两边都在它之上，够得着）。
+    "api | tasks",
     "resources",
     "services",
     "schemas",
     "models",
-    # 同层用 | 分隔，契约会额外验证它们**互不 import** —— providers 只认外部格式、
-    # db 只管连接，两者各自独立正是 architecture.md 那张图想表达的。
+    # providers 只认外部格式、db 只管连接（含 RabbitMQ 的接线），两者各自独立正是
+    # architecture.md 那张图想表达的。
     "providers | db",
     "logging",
     "config",

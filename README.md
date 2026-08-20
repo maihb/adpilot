@@ -115,6 +115,7 @@ curl -LsSf https://astral.sh/uv/install.sh | sh   # 或 brew install uv
 ```bash
 make bootstrap    # 新机器就跑这一条：生成 .env + 按 uv.lock 装依赖
 make dev          # 起接口服务，热重载
+make worker       # 另开一个终端：起 Celery worker，消费 adpilot 队列
 make check        # 推送前跑这条：CI 卡的四道门禁一次跑完
 make migrate      # 把库升到最新 schema
 make revision m='加一列 xxx'   # 改完 models/ 生成迁移草稿，**要人看一遍再提交**
@@ -144,8 +145,8 @@ make 只是短名字，没有额外逻辑 —— 每个 target 展开成什么�
 | 里程碑 | 范围 | 验收标准 | 状态 |
 |---|---|---|---|
 | D1–D2 | 骨架、compose 环境、CI | `docker compose up` 能跑，CI 绿灯 | ✅ |
-| D3–D5 | 领域模型、文件导入、REST 接口 | 导入一份 CSV，能查出归一化日指标 | ⬜ |
-| D6–D8 | Celery + RabbitMQ、Mongo 快照、规则引擎 | 任务异步执行且能重试，余额告警能触发 | ⬜ |
+| D3–D5 | 领域模型、文件导入、REST 接口 | 导入一份 CSV，能查出归一化日指标 | ✅ |
+| D6–D8 | Celery + RabbitMQ、Mongo 快照、规则引擎 | 任务异步执行且能重试，余额告警能触发 | 🟡 队列与重试已通，规则引擎未做 |
 | D9–D11 | uni-app 客户端 | 微信小程序与 H5 双端可用 | ⬜ |
 | D12–D13 | LLM 日报与诊断 | 日报里有那一行说人话的结论 | ⬜ |
 | D14 | 文档、截图、部署 | 陌生人能在五分钟内跑起来 | ⬜ |

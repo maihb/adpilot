@@ -28,6 +28,10 @@ def configure_logging(settings: Settings) -> None:
     # 临时改这一行即可。
     logging.getLogger("pymongo").setLevel(logging.INFO)
 
+    # 同理，py-amqp 在 DEBUG 下会把 AMQP 的握手全文打出来（server properties、
+    # 支持的认证机制……），就绪探针每探一次 broker 就是一大段。
+    logging.getLogger("amqp").setLevel(logging.INFO)
+
     renderer: structlog.types.Processor = (
         structlog.processors.JSONRenderer()
         if settings.is_production

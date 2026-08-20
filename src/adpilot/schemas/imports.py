@@ -34,3 +34,8 @@ class ImportResponse(BaseModel):
     #: 因为日期为空被跳过的行数。**正常情况下是 0 或 1** —— 平台导出的 CSV 末尾
     #: 常带一行「Total」汇总。这个数字明显偏大就说明文件不对，值得回头看一眼。
     skipped_rows: int
+
+    #: 自动排上队的归一化任务，拿它去 `GET /api/tasks/{task_id}` 查进度。
+    #: **`null` 表示没排上队**（队列连不上）—— 快照已经落好了，重新触发一次
+    #: 归一化即可，不要重新导一遍文件（那只会多一条快照）。
+    task_id: str | None

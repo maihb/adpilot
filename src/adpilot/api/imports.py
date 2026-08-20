@@ -6,7 +6,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
 
-from adpilot.api.deps import MongoDep, SessionDep
+from adpilot.api.deps import CeleryDep, MongoDep, SessionDep
 from adpilot.api.errors import responses
 from adpilot.models.daily_metric import MetricLevel
 from adpilot.providers import registry
@@ -34,6 +34,7 @@ MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 async def import_report_file(
     session: SessionDep,
     mongo: MongoDep,
+    celery: CeleryDep,
     account_id: Annotated[int, Form(description="快照归属的广告账户")],
     file: Annotated[UploadFile, File(description="平台后台导出的报表文件")],
     level: Annotated[
@@ -49,11 +50,15 @@ async def import_report_file(
         Form(description="日期列名。不给就自动探测，探测不到会报错并列出表头"),
     ] = None,
 ) -> ImportResponse:
-    """把一份报表文件解析成按天分组的原始快照，落进 Mongo。
+    """把一份报表文件解析成按天分组的原始快照，落进 Mongo，并排一个归一化任务。
 
     **这一步不做字段映射**，落进去的是未经解释的原始行 —— 归一化是下一步。同一个
     (账户, 日期) 导两次会得到两条快照，这是刻意的：`raw_reports` append-only，
     去重是归一化按唯一键 upsert 时的事。
+
+    响应里的 `task_id` 是自动排上队的归一化任务，拿它去 `GET /api/tasks/{task_id}`
+    看跑完没有。**它可能是 `null`** —— 队列连不上时快照照样落好，只是没人接着跑
+    归一化；这种情况重新触发一次归一化即可，别重新导一遍文件。
 
     账户不存在或文件解析不了都返回 422，`detail` 里带得上定位信息（第几行、
     哪个字段、期望什么）。
@@ -67,6 +72,7 @@ async def import_report_file(
     summary = await imports_service.import_report_file(
         session,
         mongo,
+        celery,
         account_id=account_id,
         provider_name=provider,
         content=await file.read(),

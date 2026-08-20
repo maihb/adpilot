@@ -13,9 +13,11 @@ from __future__ import annotations
 
 from urllib.parse import unquote, urlsplit
 
+from kombu.utils.url import parse_url as kombu_parse_url
 from pydantic import SecretStr
 
 from adpilot.config import Environment, Settings
+from adpilot.db.broker import create_celery_app
 from adpilot.db.mongo import create_client as create_mongo_client
 from adpilot.db.postgres import create_engine
 from adpilot.db.redis import create_client as create_redis_client
@@ -29,6 +31,7 @@ def _settings(
     *,
     mongo_auth_source: str = "admin",
     redis_password: str = "",
+    rabbitmq_vhost: str = "/",
 ) -> Settings:
     # `_env_file=None` 关掉 .env 读取。不关的话，本机 .env 里的 REDIS_PORT 会
     # 补进没有显式传的字段，于是这些用例的结果取决于跑它的那台机器 —— 而单元
@@ -43,6 +46,9 @@ def _settings(
         mongo_auth_source=mongo_auth_source,
         redis_host="redis.internal",
         redis_password=SecretStr(redis_password),
+        rabbitmq_host="rabbit.internal",
+        rabbitmq_password=SecretStr(TRICKY),
+        rabbitmq_vhost=rabbitmq_vhost,
     )
 
 
@@ -88,8 +94,37 @@ def test_redis_url_carries_an_encoded_password_when_one_is_set() -> None:
     assert unquote(parsed.password or "") == TRICKY
 
 
+def test_celery_broker_url_encodes_the_default_vhost() -> None:
+    """默认 vhost 就叫 `/`，不编码的话它会被当成路径分隔符。
+
+    断言解析回来的仍是 `/` —— 直接比字面量的话，`amqp://…:5672//` 这种「歪打
+    正着」的写法也能过，而换成任何带斜杠的 vhost 它就错了。
+    """
+    parsed = kombu_parse_url(_settings().celery_broker_url)
+
+    assert parsed["hostname"] == "rabbit.internal"
+    assert parsed["port"] == 5672
+    assert parsed["password"] == TRICKY
+    assert parsed["virtual_host"] == "/"
+
+
+def test_celery_broker_url_carries_a_custom_vhost() -> None:
+    """连一台别人也在用的 RabbitMQ 时必须换 vhost，否则队列名会在同一个空间里撞。"""
+    parsed = kombu_parse_url(_settings(rabbitmq_vhost="adpilot").celery_broker_url)
+
+    assert parsed["virtual_host"] == "adpilot"
+
+
+def test_celery_results_do_not_share_a_db_with_the_cache() -> None:
+    """清缓存（FLUSHDB）不该顺手把「那个任务成没成」一起清掉。"""
+    settings = _settings()
+
+    assert urlsplit(settings.redis_url).path == "/0"
+    assert urlsplit(settings.celery_result_backend).path == "/1"
+
+
 def test_clients_construct_when_nothing_is_configured() -> None:
-    """一个凭据都没配时，三个客户端仍然必须**构造得出来**。
+    """一个凭据都没配时，四个客户端仍然必须**构造得出来**。
 
     这条是 CI 上真红过一次才补的：`mongodb://adpilot:@host` 会让 pymongo 在
     构造时（不是连接时）抛 `ConfigurationError: A password is required`，于是
@@ -101,10 +136,11 @@ def test_clients_construct_when_nothing_is_configured() -> None:
     """
     bare = Settings(_env_file=None, environment=Environment.TEST)
 
-    # 只构造，不发任何请求 —— 三个驱动都是懒连接
+    # 只构造，不发任何请求 —— 四个驱动都是懒连接
     create_engine(bare)
     create_mongo_client(bare)
     create_redis_client(bare)
+    create_celery_app(bare).close()
 
 
 def test_secrets_do_not_leak_through_repr() -> None:

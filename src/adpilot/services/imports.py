@@ -4,6 +4,9 @@
 下一步、单独一次单向转换 —— 映射规则改了或者发现 bug，拿这些快照重跑就是了。
 这正是双库边界存在的理由（`db/mongo.py` 的模块 docstring 是那条边界的真相源）。
 
+快照落好之后**排一个归一化任务**（D6 起），接口不等它跑完。排不上队也不让导入
+失败 —— 理由写在 `services/task.py` 的 `enqueue_normalize` 里。
+
 🔴 **`raw_reports` append-only**：只 insert，永不 update、永不 delete（CLAUDE.md
 硬规矩 4）。同一个 (账户, 日期) 导两次就是两条快照，这是**刻意的** —— 平台数据
 在若干天内还会变（归因回传、无效流量剔除、汇率重算），而「当时这个数到底是多少」
@@ -17,6 +20,7 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime
 
 import structlog
+from celery import Celery
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -25,6 +29,7 @@ from adpilot.models.ad_account import AdAccount
 from adpilot.models.daily_metric import MetricLevel
 from adpilot.providers import registry
 from adpilot.providers.base import ParseError
+from adpilot.services import task as task_service
 from adpilot.services.exceptions import InvalidDataError, ReferenceNotFoundError
 
 log = structlog.get_logger(__name__)
@@ -41,10 +46,15 @@ class ImportSummary:
     rows: int
     skipped_rows: int
 
+    #: 排队等着跑的归一化任务。`None` 表示**没排上队**（broker 连不上），快照
+    #: 已经落了，归一化得另外触发一次。
+    task_id: str | None
+
 
 async def import_report_file(
     session: AsyncSession,
     mongo: MongoDatabase,
+    celery: Celery,
     *,
     account_id: int,
     provider_name: str,
@@ -52,7 +62,7 @@ async def import_report_file(
     level: MetricLevel,
     date_column: str | None = None,
 ) -> ImportSummary:
-    """解析一份报表文件，按天落成原始快照。
+    """解析一份报表文件，按天落成原始快照，并排一个归一化任务。
 
     账户不存在抛 `ReferenceNotFoundError`，文件解析不了抛 `InvalidDataError`。
 
@@ -68,7 +78,12 @@ async def import_report_file(
         provider = registry.create(provider_name, date_column=date_column)
         # 解析是 CPU 密集的（几千行的 CSV），丢进线程池 —— 在事件循环里做会把
         # **整个进程**的所有请求一起卡住，而那种「全局变慢」排查起来非常贵。
-        # D6 起这条链路会挪到 Celery worker 里，那时这层包装可以去掉。
+        #
+        # D6 **没有**把这一步挪进 Celery（原计划如此，实测下来不划算）：文件内容
+        # 得跟着消息走一遍 broker，十兆的 base64 塞进 RabbitMQ 是在拿队列当对象
+        # 存储用；更要紧的是，解析失败恰恰是**要当场说**的那类错误 —— 层级填错、
+        # 日期列认不出来，得趁上传的人还盯着屏幕告诉他。挪进 worker 的是归一化：
+        # 那一段重、且没人需要盯着看。
         result = await asyncio.to_thread(provider.parse, content)
     except ParseError as exc:
         raise InvalidDataError(exc.message) from exc
@@ -94,6 +109,11 @@ async def import_report_file(
     ]
     await mongo[RAW_REPORTS].insert_many(documents)
 
+    # 排队而不是当场跑：归一化要读回全部快照、映射几千行、再 upsert 进 PG，把它
+    # 留在请求线程里就是让上传的人对着转圈等。**不带 stat_date** —— 一份文件常常
+    # 横跨多天，投一个「整个账户重跑」比按天投 N 条省事，而归一化本来就是幂等的。
+    task_id = await task_service.enqueue_normalize(celery, account_id=account_id)
+
     summary = ImportSummary(
         provider=provider.name,
         account_id=account_id,
@@ -101,6 +121,7 @@ async def import_report_file(
         days=[day.stat_date for day in result.days],
         rows=sum(len(day.rows) for day in result.days),
         skipped_rows=result.skipped_rows,
+        task_id=task_id,
     )
     log.info(
         "raw_report_imported",
@@ -110,6 +131,7 @@ async def import_report_file(
         days=len(summary.days),
         rows=summary.rows,
         skipped_rows=summary.skipped_rows,
+        task_id=task_id,
     )
     return summary
 
