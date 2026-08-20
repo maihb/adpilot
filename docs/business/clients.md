@@ -31,6 +31,12 @@
 | `listAdAccounts` | `GET /api/ad-accounts` | 可按 `client_id` / `platform` / `is_active` 筛 |
 | `getAdAccount` | `GET /api/ad-accounts/{account_id}` | 取单个 |
 | `updateAdAccount` | `PATCH /api/ad-accounts/{account_id}` | 身份字段改不动，见下 |
+| `createInvite` | `POST /api/clients/{client_id}/invites` | 生成邀请码，规则见 [auth](auth.md) |
+| `listInvites` | `GET /api/clients/{client_id}/invites` | 列出某个客户的码，不含明文 |
+| `revokeInvite` | `POST /api/clients/{client_id}/invites/{invite_id}/revoke` | 作废 |
+
+邀请码挂在客户下面，但它的规则属于认证链路，写在
+[认证与作用域](auth.md)那一篇里，这里不复述。
 
 ## 能读文档就够的部分
 
@@ -40,6 +46,7 @@
 | 账户唯一键 | `(platform, external_id)`，重复返回 409。这是幂等重导的依据 —— 建重了，同一天的数据会分裂到两行，两边都对、加起来才是全部 |
 | 跨平台同号是合法的 | 唯一键是**组合**，Meta 和 TikTok 各有一个同号账户很正常 |
 | 没有删除 | 停止合作置 `is_active=false`。历史日报和结算都挂在客户下面，删了就成孤儿。两张表都没有 DELETE 接口 |
+| 停用是**有副作用**的 | 置 `is_active=false` 之后，这个客户手上的 token **立刻**失效、邀请码也换不出新的。那是自包含 token 唯一的「踢人」手段，见 [auth](auth.md) |
 | 停用不影响查询 | 列表默认连停用的一起返回，要筛用 `is_active` 参数 |
 | PATCH 是局部更新 | 只动请求体里出现的字段；**显式传 `null` 会把 `note` 清空**，不传则原样不动 |
 | 账户身份字段改不动 | `platform` 和 `external_id` 不在 PATCH 请求体里，传了会被静默忽略。要换就建新账户、停用旧的 |

@@ -87,6 +87,12 @@ cp .env.example .env
 # 本仓库里没有任何服务带默认凭据
 openssl rand -base64 24
 
+# 认证也要两样东西（D9 起接口全部要登录）：
+openssl rand -base64 32                        # → 填进 AUTH_SECRET
+uv run python -m adpilot.auth.password         # 交互式输入密码，把它打印的那行
+                                               #   OPERATOR_PASSWORD_HASH='...' 整行贴进 .env
+                                               #   **单引号不能省**，哈希里的 $ 会被 compose 展开
+
 docker compose up -d
 
 # 建表。刻意不做「启动时自动迁移」—— 那意味着你看不见它执行了什么
@@ -100,9 +106,23 @@ docker compose run --rm api python -m adpilot.seed
 
 | 什么 | 地址 |
 |---|---|
-| 接口文档（Swagger） | http://localhost:8000/docs |
+| 接口文档（Swagger） | http://localhost:8000/docs（`ENVIRONMENT=prod` 时关闭） |
 | 存活探针 | http://localhost:8000/api/health/live |
 | 就绪探针（逐个探测依赖） | http://localhost:8000/api/health/ready |
+
+**除了这两个探针和两个换 token 的入口，所有接口都要登录。** 拿一张运营票：
+
+```bash
+TOKEN=$(curl -sX POST localhost:8000/api/auth/login \
+    -H 'Content-Type: application/json' \
+    -d '{"username":"admin","password":"你刚才设的密码"}' | jq -r .token)
+
+curl -H "Authorization: Bearer $TOKEN" localhost:8000/api/clients
+```
+
+客户那一侧走**邀请码**：运营给某个客户生成一个码，渲染成二维码发出去，客户扫了就
+换到一张 7 天的票，之后只能看自己的数据（`/api/portal/*`，全只读）。`make seed`
+跑完会直接打印一个可用的码。
 
 示例数据是 3 个客户、4 个广告账户、28 天日指标，跨 Meta / TikTok、跨三种币种与三个
 时区。它**只添不改**，重复跑安全；`ENVIRONMENT=prod` 时直接拒绝执行。
@@ -110,8 +130,8 @@ docker compose run --rm api python -m adpilot.seed
 四个账户各自演示一种规则结局，所以跑一次巡检应当**恰好**得到两条告警：
 
 ```bash
-curl -X POST localhost:8000/api/alerts/sweep   # 平时由 beat 每小时自动跑
-curl localhost:8000/api/alerts
+curl -H "Authorization: Bearer $TOKEN" -X POST localhost:8000/api/alerts/sweep
+curl -H "Authorization: Bearer $TOKEN" localhost:8000/api/alerts
 ```
 
 一条是余额只够撑约 2 天的预充账户，一条是昨天花一样的钱、转化少了一半（CPA 翻倍）
@@ -131,6 +151,8 @@ curl -LsSf https://astral.sh/uv/install.sh | sh   # 或 brew install uv
 
 ```bash
 make bootstrap    # 新机器就跑这一条：生成 .env + 按 uv.lock 装依赖
+uv run python -m adpilot.auth.password   # 生成运营密码哈希（交互式，不接受命令行参数
+                                         #   —— 那会把明文写进 shell history）
 make dev          # 起接口服务，热重载
 make worker       # 另开一个终端：起 Celery worker，消费 adpilot 队列
 make beat         # 再开一个：起定时排期（每小时的告警巡检靠它）
@@ -166,12 +188,16 @@ make 只是短名字，没有额外逻辑 —— 每个 target 展开成什么�
 | D1–D2 | 骨架、compose 环境、CI | `docker compose up` 能跑，CI 绿灯 | ✅ |
 | D3–D5 | 领域模型、文件导入、REST 接口 | 导入一份 CSV，能查出归一化日指标 | ✅ |
 | D6–D8 | Celery + RabbitMQ、Mongo 快照、规则引擎 | 任务异步执行且能重试，余额告警能触发 | ✅ |
-| D9–D11 | uni-app 客户端 | 微信小程序与 H5 双端可用 | ⬜ |
-| D12–D13 | LLM 日报与诊断 | 日报里有那一行说人话的结论 | ⬜ |
-| D14 | 文档、截图、部署 | 陌生人能在五分钟内跑起来 | ⬜ |
+| D9 | 认证、授权作用域、邀请码 | 拿别人的 token 查不到我的数据，且有测试盯着 | ✅ |
+| D10–D11 | uni-app 客户端 | 微信小程序与 H5 双端可用 | ⬜ |
+| D12 | Vue 3 内部后台 | 客户管理、导入、邀请码生成能在页面上走完 | ⬜ |
+| D13–D14 | LLM 日报与诊断 | 日报里有那一行说人话的结论 | ⬜ |
+| D15 | 文档、截图、部署 | 陌生人能在五分钟内跑起来 | ⬜ |
 
 **v1 刻意不做：** 不接 Ads API（适配器接口已预留 —— 平台应用审核比这个里程碑还长）、
-不做多租户 SaaS、不做自动改预算、不做素材管理。
+不做多租户 SaaS、不做自动改预算、不做素材管理、不做用户管理（运营账号从环境变量来，
+单实例单使用者）、不做 token 撤销列表（自包含 token 的代价，见
+[认证文档](docs/business/auth.md)）。
 
 ## 参与
 

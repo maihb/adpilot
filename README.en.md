@@ -100,6 +100,13 @@ cp .env.example .env
 # by design: no service in this repo has a default credential
 openssl rand -base64 24
 
+# Authentication needs two more things (every endpoint requires a login as of D9):
+openssl rand -base64 32                        # → put this in AUTH_SECRET
+uv run python -m adpilot.auth.password         # prompts for a password, then prints
+                                               #   OPERATOR_PASSWORD_HASH='...' — paste that
+                                               #   whole line, **keep the single quotes**:
+                                               #   compose expands the $ in the hash otherwise
+
 docker compose up -d
 
 # Create the tables. Auto-migrating on startup is deliberately not done —
@@ -115,9 +122,25 @@ Then:
 
 | What | Where |
 |---|---|
-| API docs (Swagger) | http://localhost:8000/docs |
+| API docs (Swagger) | http://localhost:8000/docs (disabled when `ENVIRONMENT=prod`) |
 | Liveness | http://localhost:8000/api/health/live |
 | Readiness (probes every dependency) | http://localhost:8000/api/health/ready |
+
+**Apart from those two probes and the two token endpoints, everything requires a
+login.** Grab an operator token:
+
+```bash
+TOKEN=$(curl -sX POST localhost:8000/api/auth/login \
+    -H 'Content-Type: application/json' \
+    -d '{"username":"admin","password":"the password you just set"}' | jq -r .token)
+
+curl -H "Authorization: Bearer $TOKEN" localhost:8000/api/clients
+```
+
+Clients get in through an **invite code**: an operator generates one, renders it as
+a QR code, and the client scans it to receive a 7-day token that can only read
+their own data (`/api/portal/*`, read-only). `make seed` prints a usable code when
+it finishes.
 
 The sample data is 3 clients and 4 ad accounts with 28 days of daily metrics,
 spanning Meta / TikTok, three currencies and three time zones. It **only adds,
@@ -128,8 +151,8 @@ Each account demonstrates a different rule outcome, so one sweep should produce
 **exactly** two alerts:
 
 ```bash
-curl -X POST localhost:8000/api/alerts/sweep   # normally driven hourly by beat
-curl localhost:8000/api/alerts
+curl -H "Authorization: Bearer $TOKEN" -X POST localhost:8000/api/alerts/sweep
+curl -H "Authorization: Bearer $TOKEN" localhost:8000/api/alerts
 ```
 
 One is a prepaid account with roughly 2 days of balance left; the other spent the
@@ -151,6 +174,9 @@ From there `make help` lists everything. The ones you'll actually use:
 
 ```bash
 make bootstrap    # new machine, one command: create .env + install from uv.lock
+uv run python -m adpilot.auth.password   # generate the operator password hash
+                                         #   (interactive — it refuses command-line
+                                         #   arguments, which would land in shell history)
 make dev          # run the API with hot reload
 make worker       # in a second terminal: run the Celery worker on the adpilot queue
 make beat         # and a third: run the scheduler (hourly alert sweep depends on it)
@@ -187,13 +213,18 @@ that is merely recommended rots; if it matters here, it fails the build.
 | D1–D2 | Skeleton, compose stack, CI | `docker compose up` works, CI green | ✅ |
 | D3–D5 | Domain model, file import, REST API | Import a CSV, query normalised daily metrics | ✅ |
 | D6–D8 | Celery + RabbitMQ, Mongo snapshots, rule engine | Tasks run async with retries; balance alert fires | ✅ |
-| D9–D11 | uni-app client | Mini Program and H5 both running | ⬜ |
-| D12–D13 | LLM reports and diagnosis | Report carries the one line of plain English that matters | ⬜ |
-| D14 | Docs, screenshots, deploy | A stranger can run it within five minutes | ⬜ |
+| D9 | Authentication, authorisation scope, invite codes | Someone else's token cannot reach my data, and a test says so | ✅ |
+| D10–D11 | uni-app client | Mini Program and H5 both running | ⬜ |
+| D12 | Vue 3 admin console | Client management, imports and invite codes usable from the UI | ⬜ |
+| D13–D14 | LLM reports and diagnosis | Report carries the one line of plain English that matters | ⬜ |
+| D15 | Docs, screenshots, deploy | A stranger can run it within five minutes | ⬜ |
 
 **Deliberately out of scope for v1:** no live Ads API (the adapter interface is
 reserved — platform app review takes longer than this milestone), no multi-tenant
-SaaS mode, no automated budget changes, no creative asset management.
+SaaS mode, no automated budget changes, no creative asset management, no user
+management (the operator account comes from environment variables — single
+instance, single operator), no token revocation list (the price of self-contained
+tokens, see the [auth notes](docs/business/auth.md), in Chinese).
 
 ## Contributing
 

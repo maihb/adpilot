@@ -43,8 +43,14 @@
 
 ```
 /api/...          内部接口（现有全部 8 组，加上认证）
-/api/client/...   客户端接口（只读，作用域锁死在一个客户上）
+/api/portal/...   客户端接口（只读，作用域锁死在一个客户上）
 ```
+
+> **落地时从 `/api/client/` 改成了 `/api/portal/`**（2026-08-21，D9）。两个理由：
+> `api/client.py` 已经是客户管理的路由文件，同名目录建不出来；更要紧的是
+> `/api/clients`（运营管客户）和 `/api/client/...`（客户看自己）**只差一个 `s`，
+> 而两者的授权模型正好相反** —— review 一段路径字符串时，那个差别小到不足以让人
+> 停下来。`portal` 让模块名、tag 和路径三者一致，作用域门禁也按这个前缀扫。
 
 不做成「同一套接口 + 在 handler 里判断身份」，三个理由：
 
@@ -104,6 +110,11 @@ v1.<base64url(payload)>.<base64url(hmac_sha256(payload, AUTH_SECRET))>
 
 payload 里只有四个字段：`scope`（`client` / `operator`）、`sub`（客户端是
 `client_id`，内部是运营标识）、`exp`、`iat`。
+
+⚠️ **`iat` 是「首次签发」，不是「本次签发」。** 续期时它原样保留，只推 `exp` ——
+下一节那个 90 天绝对上限正是 `iat + 90 天` 算出来的，而自包含 token 里必须有个
+东西记住起点。让 `iat` 担这个角色，比加第五个字段省事，代价是这句话必须写下来：
+重置它一次，那条上限就形同虚设，而且不会有任何报错。
 
 **为什么不用 JWT。** JWT 的灵活性这里一样都用不上（不需要多算法、不需要跨服务
 验签、不需要第三方签发），而它的复杂度带来了真实的攻击面：`alg: none`、
@@ -183,11 +194,14 @@ admin/               Vue 3 + TS + Element Plus，内部操作台
 src/adpilot/
   auth/              🆕 顶层模块：token 的签发与校验
     token.py         纯函数，只依赖 config —— 不碰数据库
+    password.py      运营密码的 argon2 哈希；`python -m adpilot.auth.password` 生成
   models/invite.py   🆕 邀请码
-  services/invite.py 🆕 生成、校验、作废
+  services/invite.py 🆕 生成、兑换、作废
   api/
     deps.py          加 ClientScopeDep / OperatorDep
-    client/          🆕 客户端接口，作用域锁死
+    auth.py          🆕 登录、续期、邀请码兑换
+    invite.py        🆕 邀请码的运营侧接口（tag 用 clients，挂在客户下面）
+    portal.py        🆕 客户端接口，作用域锁死（单文件，五个接口用不着建目录）
 ```
 
 `auth/` 是新顶层模块，分层契约开着 `exhaustive`，**必须先在
@@ -212,6 +226,9 @@ src/adpilot/
 
 代价老实说清楚：CI 要装 Node，集成 job 会变慢。
 
+> **这道门禁挪到 D10 第一件事**（2026-08-21，D9）：它要 CI 装 Node，而 D9 结束时
+> 一个前端都还没有 —— 生成出来的 `.ts` 没有任何人消费，那样的门禁只是成本。
+
 ---
 
 ## 七、里程碑：D9–D11 装不下
@@ -221,7 +238,7 @@ src/adpilot/
 
 | 天 | 产出 | 验收标准 |
 |---|---|---|
-| D9 | 认证层 + 授权作用域 + 邀请码 | 拿别人的 token 查不到我的数据，且这件事有测试盯着 |
+| D9 ✅ | 认证层 + 授权作用域 + 邀请码 | 拿别人的 token 查不到我的数据，且这件事有测试盯着 |
 | D10–D11 | uni-app 客户端 | 微信小程序 + H5 双端能跑，扫码进去看到看板 |
 | D12 | Vue 3 内部后台 | 客户管理、导入、邀请码生成能在页面上走完 |
 | D13–D14 | LLM 日报 + 诊断 | 日报有那一行人话，输出过 schema 校验 |

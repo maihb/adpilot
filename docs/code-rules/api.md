@@ -53,9 +53,18 @@ ORM 对象构造出参就在 schema 上开 `model_config = ConfigDict(from_attri
 from adpilot.api.deps import SessionDep, SettingsDep
 ```
 
-理由是可替换性 —— 测试要替掉的是**依赖**，别名让替换点只有一处。目前有三个：
-`ResourcesDep`、`SettingsDep`、`SessionDep`；新增外部系统时在 `deps.py` 里加，
-不在 handler 里现取。
+理由是可替换性 —— 测试要替掉的是**依赖**，别名让替换点只有一处。新增外部系统时
+在 `deps.py` 里加，不在 handler 里现取。
+
+**认证也是依赖**，但两组接口挂法不同：
+
+- **内部接口不写**认证依赖 —— `main.py` 按 router 统一挂 `require_operator`，
+  加一组路由时去那个循环里加一行。写在 handler 上漏掉一个不会有任何报错。
+- **客户端接口（`/api/portal/*`）每个 handler 都要写 `ClientScopeDep`**，因为它有
+  返回值（`client_id`），handler 要用它去过滤。
+
+两边都有门禁盯着（`tests/test_auth_guard.py`）：每个接口要么带 security、要么在
+一份显式的豁免清单里；`/api/portal/` 下的还必须是 `ClientBearer`。
 
 **handler 不自己开事务。** `SessionDep` 背后是 `db/postgres.py` 的 `session_scope`：
 正常返回就提交、抛异常就回滚。业务代码里出现 `session.commit()` 通常说明走错了路。
@@ -68,7 +77,9 @@ from adpilot.api.deps import SessionDep, SettingsDep
 - 入参不合法 → Pydantic 自动 422，**不要手写校验分支**
 - 资源不存在 → 404；业务规则不允许 → 409 或 422，由 `api/` 层从领域异常翻译，
   翻译规则见 [`conventions.md` 错误处理](conventions.md#错误处理)
-- 依赖不可用 → 503（就绪探针已经是这个语义）
+- 没带 token / token 无效或过期 → 401，**响应体固定一句话**，不区分是哪一种
+- 依赖不可用、或服务端没配 `AUTH_SECRET` → 503（就绪探针已经是这个语义）
+- **越权一律 404，不是 403** —— 403 等于承认「那个资源存在，只是不给你看」
 - **响应体里不放内部错误细节**，理由见 `api/health.py` 里 `_run_probe` 的 docstring
 
 ---

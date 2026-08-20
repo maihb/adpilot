@@ -18,11 +18,13 @@ from decimal import Decimal
 
 import pytest
 from pydantic import SecretStr
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from adpilot import seed
 from adpilot.config import Environment, Settings
 from adpilot.rules import anomaly as anomaly_rules
 from adpilot.rules import balance as balance_rules
+from adpilot.services import invite as invite_service
 
 # 计划里那四个账户，按它们各自要演示的规则结局取名。
 HEALTHY = "demo-meta-0001"
@@ -265,3 +267,25 @@ def test_seed_refuses_production(monkeypatch: pytest.MonkeyPatch) -> None:
         seed.main()
 
     assert "prod" in str(raised.value)
+
+
+@pytest.mark.integration
+async def test_the_demo_invite_code_is_random_and_actually_works(
+    live_session: AsyncSession,
+) -> None:
+    """seed 发出来的邀请码必须是**随机的**，且真的能换到那个客户。
+
+    写死一个「demo 码」等于往公开仓库里放一把人人皆知的钥匙 —— 哪怕它只对示例
+    数据有效，也会有人把 seed 跑在一个已经有真实客户的库上。两次调用拿到同一个
+    码，就是那件事发生了。
+    """
+    await seed.seed(live_session)
+
+    name, first = await seed.issue_demo_invite(live_session)
+    _, second = await seed.issue_demo_invite(live_session)
+
+    assert first != second, "两次发出同一个码，说明它被写死在源码里了"
+    assert len(first) >= 32, "码太短，熵不够 —— 这是个不需要认证就能试的入口"
+
+    redeemed = await invite_service.redeem(live_session, first)
+    assert redeemed.name == name

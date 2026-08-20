@@ -75,6 +75,7 @@ from adpilot.rules import balance as balance_rules
 from adpilot.services import ad_account as ad_account_service
 from adpilot.services import balance as balance_service
 from adpilot.services import client as client_service
+from adpilot.services import invite as invite_service
 
 log = structlog.get_logger(__name__)
 
@@ -614,12 +615,33 @@ def _bump(summary: SeedSummary, **deltas: int) -> SeedSummary:
     )
 
 
-async def _run(settings: Settings) -> SeedSummary:
+async def issue_demo_invite(session: AsyncSession) -> tuple[str, str]:
+    """给第一个示例客户发一个邀请码，返回 (客户名, **明文码**)。
+
+    **每次跑 seed 都新发一个**，旧的仍然有效。这看起来违反了本模块「只添不改」
+    的调子，其实正合它：新发是「添」，而明文码存不下来（库里是哈希），不重新发
+    的话第二次跑 seed 的人就再也拿不到一个能用的码了。
+
+    🔴 **码是随机生成的，不是写死在源码里的常量。** 写死一个「demo 码」等于往
+    公开仓库里放一把人人皆知的钥匙 —— 哪怕它只对示例数据有效，也会有人把 seed
+    跑在一个已经有真实客户的库上。有测试盯着这件事（`tests/test_seed.py`）。
+    """
+    client = await session.scalar(select(Client).where(Client.name == _PLAN[0].name))
+    if client is None:  # pragma: no cover - seed 刚跑完，这个客户一定在
+        raise RuntimeError(f"示例客户不存在：{_PLAN[0].name}")
+
+    _, code = await invite_service.create(session, client_id=client.id)
+    return client.name, code
+
+
+async def _run(settings: Settings) -> tuple[SeedSummary, str, str]:
     engine = create_engine(settings)
     factory = create_session_factory(engine)
     try:
         async with transaction(factory) as session:
-            return await seed(session)
+            summary = await seed(session)
+            client_name, code = await issue_demo_invite(session)
+            return summary, client_name, code
     finally:
         # 不 dispose 的话进程退出时 asyncpg 会抱怨连接被 GC 掉，那个报错跟真正
         # 发生的事毫无关系，只会干扰下一个读日志的人。
@@ -639,7 +661,7 @@ def main() -> None:
             "确实要在类生产环境演示，先把 .env 里的 ENVIRONMENT 改掉。"
         )
 
-    summary = asyncio.run(_run(settings))
+    summary, invite_client, invite_code = asyncio.run(_run(settings))
 
     # 这里用 print 不用 log：给人看的命令行回执，不该被 structlog 的 JSON 格式
     # 包起来 —— prod 下那套格式正是为机器准备的，而这个模块只在 dev 下跑。
@@ -650,9 +672,21 @@ def main() -> None:
         f"  日指标  新增 {summary.metrics_inserted} 行，已存在 {summary.metrics_existing} 行\n"
         f"  余额    新录 {summary.balances_recorded}，已存在 {summary.balances_existing}\n"
         "\n"
-        "接下来：\n"
-        "  curl localhost:8000/api/clients\n"
-        "  curl -X POST localhost:8000/api/alerts/sweep   # 应当得到 2 条告警"
+        f"「{invite_client}」的邀请码（每次跑 seed 都新发一个，只显示这一次）：\n"
+        f"  {invite_code}\n"
+        "\n"
+        "接下来 —— 内部接口都要运营 token（账号在 .env 的 OPERATOR_USERNAME）：\n"
+        "  TOKEN=$(curl -sX POST localhost:8000/api/auth/login \\\n"
+        "      -H 'Content-Type: application/json' \\\n"
+        '      -d \'{"username":"admin","password":"你设的密码"}\' | jq -r .token)\n'
+        '  curl -H "Authorization: Bearer $TOKEN" localhost:8000/api/clients\n'
+        '  curl -H "Authorization: Bearer $TOKEN" -X POST localhost:8000/api/alerts/sweep'
+        "   # 应当得到 2 条告警\n"
+        "\n"
+        "客户那一侧不需要运营 token，拿上面那个码换一张 7 天的票：\n"
+        f"  curl -sX POST localhost:8000/api/auth/redeem \\\n"
+        "      -H 'Content-Type: application/json' \\\n"
+        f'      -d \'{{"code":"{invite_code}"}}\''
     )
 
 

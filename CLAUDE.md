@@ -22,6 +22,7 @@
 | 范围、里程碑、哪些是**刻意不做**的 | [`docs/design/2026-08-19-mvp-design.md`](docs/design/2026-08-19-mvp-design.md) |
 | **加表 / 改字段、迁移怎么生成、autogenerate 有哪些盲区** | [`docs/design/2026-08-19-schema-migration.md`](docs/design/2026-08-19-schema-migration.md) |
 | **认证、授权作用域、两个前端怎么摆**（D9 起） | [`docs/design/2026-08-21-client-auth.md`](docs/design/2026-08-21-client-auth.md) |
+| **加一个要认证的接口 / 客户端接口** | [`docs/business/auth.md`](docs/business/auth.md) + [`docs/business/portal.md`](docs/business/portal.md) |
 | **代码摆在哪、依赖往哪个方向走** | [`docs/code-rules/architecture.md`](docs/code-rules/architecture.md) |
 | 金额 / 时区 / 类型 / 异步 / 测试 / 日志 / 配置密钥 / **改完必做清单** | [`docs/code-rules/conventions.md`](docs/code-rules/conventions.md) |
 | **加一个接口**（含可照抄的四步与踩坑速查） | [`docs/code-rules/api.md`](docs/code-rules/api.md) |
@@ -54,12 +55,16 @@
 3. **LLM 只建议，不执行。** 改预算、关广告、调出价 —— 一律只产出建议，绝不代为
    执行。凡是确定性规则能算出来的，就必须写成规则而不是提示词。见设计文档第五节。
 
-4. **原始快照 append-only。** Mongo 里 `raw_reports` 的文档永不更新、永不删除。
+4. **作用域不靠自觉。** 客户端那条路径上的每个服务函数，`client_id` 是**必填
+   关键字参数**；每个 `/api/portal/*` 路由都要声明 `ClientScopeDep`。漏一次的
+   后果是把 A 客户的花费给 B 客户看见，而这种漏**不会有任何报错**。
+
+5. **原始快照 append-only。** Mongo 里 `raw_reports` 的文档永不更新、永不删除。
    它既是审计留痕，也是重跑归一化的输入。
 
-5. **金额一律 `numeric` / `Decimal`。** 凡是沾钱的地方，永远不要用浮点。
+6. **金额一律 `numeric` / `Decimal`。** 凡是沾钱的地方，永远不要用浮点。
 
-6. **每道门禁都要跑在 CI 里。** 一条规矩重要，就把它写成 lint、类型检查或测试。
+7. **每道门禁都要跑在 CI 里。** 一条规矩重要，就把它写成 lint、类型检查或测试。
    只活在文字里的约定一定会腐化。
 
 ## 护栏一览
@@ -84,6 +89,10 @@
 | **改了 model 别忘了生成迁移** | `alembic check` 跑在 CI 的集成 job 里（要连真实库） |
 | **分层依赖不许倒流** | `lint-imports`（import-linter）跑在 CI 里，契约就是 [`architecture.md`](docs/code-rules/architecture.md#分层与依赖方向) 那张图，配置在 `pyproject.toml`。`exhaustive` 开着 —— 新增顶层模块必须先在分层图里占个位置，不能先建了再说 |
 | **加了接口别忘了业务文档** | `tests/test_business_docs.py`：OpenAPI 里的每个 tag 都要在 [`BUSINESS.md`](docs/business/BUSINESS.md) 的索引表里登记，**双向都查**（登记了却没接口也红），外加一条死链检查 |
+| **接口不许漏掉认证** | `tests/test_auth_guard.py`：遍历 openapi.json，每个接口要么带 `security`、要么在一份**显式的豁免清单**里（目前四条：两个探针 + 两个换 token 的入口）。**两个方向都查** —— 清单里留着一条其实已经要认证的也红。判据取 `security` 是因为它由 FastAPI 从依赖树收集，写不了假 |
+| **客户端路由不许漏掉作用域** | 同上那个文件：`/api/portal/` 下的每个接口都必须要 `ClientBearer`，且**不许接受任何形式的 `client_id` 入参** —— 它只能来自 token。这只是第一层；第二层是 `services/` 里 `client_id` 必填关键字参数，让「查全部客户」在那条路径上根本写不出来 |
+| **签名比对不许写成 `==`** | `tests/test_auth_token.py` 最后一条**扫源码**：`verify` 里必须有 `compare_digest`，且验签必须排在解析和过期判定之前。这三件事没有可观察的行为差异，测不出来，只能盯代码形状 |
+| **示例邀请码不许写死** | `tests/test_seed.py`：seed 两次发出的码必须不同。写死一个「demo 码」等于往公开仓库里放一把人人皆知的钥匙 |
 | 数据卷不被顺手删掉 | 守卫拦下 `docker compose down -v` |
 | **push 要人明确说** | `settings.json` 里 `Bash(git push:*)` 是 deny。用户说「提交」只意味着 commit |
 | 只读命令不该反复弹窗 | 守卫按「拆出每个命令位置的可执行名，全部只读才放行」自动放行，边界写在 [`.claude/bash_guard.py`](.claude/bash_guard.py) 的模块 docstring 里 |

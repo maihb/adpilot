@@ -3,11 +3,11 @@
 技术选型的来龙去脉在[设计文档第四节](../design/2026-08-19-mvp-design.md)，这里只讲
 **代码怎么摆、依赖往哪个方向走**。
 
-> **进度**：D1–D8 完成 —— 骨架、四个客户端、`models/` + Alembic 迁移、`schemas/`、
+> **进度**：D1–D9 完成 —— 骨架、四个客户端、`models/` + Alembic 迁移、`schemas/`、
 > `services/`、`providers/`、`tasks/`（含每小时的告警巡检）、`rules/`（余额可撑
-> 天数、指标周同比异动）和 `notifiers/` 都已落地，另有 `seed.py` 提供脱敏示例
-> 数据。只剩 `llm/` 还标着 🚧 —— 先把位置定下来，是为了三个人（或三个 agent）
-> 各写各的时候不会摆出三套结构。
+> 天数、指标周同比异动）、`notifiers/` 和 `auth/`（自签 HMAC token + 授权作用域）
+> 都已落地，另有 `seed.py` 提供脱敏示例数据。只剩 `llm/` 还标着 🚧 —— 先把位置
+> 定下来，是为了三个人（或三个 agent）各写各的时候不会摆出三套结构。
 
 ---
 
@@ -27,9 +27,12 @@ src/adpilot/
     broker.py       Celery 应用的构造、队列与死信队列、任务名常量
   api/
     deps.py         FastAPI 依赖 + Annotated 别名（ResourcesDep/SessionDep/…）
-    errors.py       领域异常 → HTTP 状态码，**唯一的翻译点**
+                    **两个身份依赖也在这里**：OperatorDep / ClientScopeDep
+    errors.py       领域异常 → HTTP 状态码，**唯一的翻译点**（含 401 / 503）
     pagination.py   分页入参（page / page_size，硬上限 100）
     health.py       存活与就绪探针 —— 加接口时照着它的写法抄
+    auth.py         登录、续期、邀请码兑换 —— **仅有的两个免认证接口在这里**
+    portal.py       客户端接口（`/api/portal/*`），只读且作用域锁死在一个客户上
   models/           SQLAlchemy ORM 模型，一个领域一个文件 —— **表结构的真相源**
     types.py        自定义列类型（StrEnum 存 varchar，不用 PG 原生 ENUM）
     mixins.py       共用列（created_at / updated_at）
@@ -42,6 +45,9 @@ src/adpilot/
     app.py          worker 入口（`celery -A adpilot.tasks.app`）+ 重试策略基类
     runtime.py      同步的 Celery ↔ async 业务代码；**两个致命坑写在它的 docstring 里**
     alerts.py       定时巡检；排期在 db/broker.py 的 beat_schedule，要单起一个 beat 进程
+  auth/             token 的签发与校验、运营密码哈希。**够不着数据库，契约保证**
+    token.py        自签 HMAC；四件「错了不会报错」的事写在它的模块 docstring 里
+    password.py     argon2；`python -m adpilot.auth.password` 生成哈希
   rules/            规则引擎：纯函数，数据进、判定出。**够不着数据库，契约保证**
     balance.py      余额可撑天数与告警阈值
     anomaly.py      指标周同比异动（库存断货还没做）
@@ -73,7 +79,10 @@ grep 一次就能找齐。
 ```
 config / logging          ← 谁都能 import，它们谁都不 import
       ↑
-rules                     ← 纯函数：数据进、判定出。**够不着上面任何一层**
+auth  ‖  rules            ← 纯计算：数据进、结论出。**够不着上面任何一层**
+                            （auth 够不着 models/db，所以「查一下这个 token 撤销
+                             没有」写不出来 —— 那正是「自包含 token 不可撤销」
+                             这个决定的机器形态）
       ↑
 db / providers            ← 基础设施：连接、外部系统适配
 notifiers / llm           ← （同一层：入站 providers、出站 notifiers）
@@ -98,7 +107,7 @@ main  ‖  seed             ← 组装：main 把 api 装成应用，seed 把示
    任务和规则巡检会调同一批服务函数，那些调用方没有请求对象可给。
 2. **`api/` 不写业务判断。** 只做：解析入参 → 调服务 → 把领域异常翻成状态码。
    一个 handler 里出现 `if` 套 `if` 的业务分支，说明那段该在 `services/`。
-3. **`rules/` 只依赖数据，不依赖 IO。** 规则引擎收的是已经查好的数据结构，返回
+3. **`rules/` 与 `auth/` 只依赖数据，不依赖 IO。** 规则引擎收的是已经查好的数据结构，返回
    判定结果，**不自己查库**。这条是为了让「余额还能撑几天」这类计算能用一张表格
    式的参数化测试覆盖完，而不必起数据库。所以它在图上被压到了很低的位置 ——
    低到够不着 `models` / `schemas` / `db`，写一句 `select(...)` 会被契约当场拦下。
@@ -200,6 +209,8 @@ result backend 由接口去查（`GET /api/tasks/{id}`）。worker **不回调**
 | 一个后台任务 | `tasks/<domain>.py` | `tasks/normalize.py`；任务体只做编排，逻辑仍在 `services/`。**别忘了在 `tasks/app.py` 的 `TASK_MODULES` 里加一行**，否则 worker 认不出这个任务（有门禁盯着） |
 | 一个定时任务 | 同上 + `db/broker.py` 的 `beat_schedule` | 排期要显式指定 `queue`，否则消息进默认队列没人取。跑起来还要有一个 beat 进程 |
 | 一个通知通道 | `notifiers/<channel>.py` | `notifiers/webhook.py`；只管送出去，失败返回 `False` 不抛 |
+| 一个**内部**接口 | 同「一个接口」，另外去 `main.py` 那个循环里加一行 | 认证统一在那里挂，漏了会被 `tests/test_auth_guard.py` 拦下 |
+| 一个**客户端**接口 | `api/portal.py` + `schemas/portal.py` | 必须声明 `ClientScopeDep`，服务函数的 `client_id` 必须是**必填关键字参数**。两道门禁见 [`business/portal.md`](../business/portal.md) |
 
 **判定规则一句话：带 HTTP 语义的进 `api/`，带外部系统的进 `db/`/`providers/`，
 其余都是 `services/` 或 `rules/`。**
