@@ -113,7 +113,7 @@
 
 ```bash
 uv sync --all-extras
-uv run uvicorn adpilot.main:app --reload
+uv run uvicorn adpilot.main:app --reload --reload-dir src   # 只盯 src，改测试不白重启
 
 uv run ruff check . && uv run ruff format --check .
 uv run mypy src tests

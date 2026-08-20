@@ -21,6 +21,13 @@ def configure_logging(settings: Settings) -> None:
 
     logging.basicConfig(format="%(message)s", stream=sys.stdout, level=level)
 
+    # DEBUG 会一路传导到第三方库，而 pymongo 每做一次操作要打四五条协议级日志
+    # （Connection checkout → Command started → Command succeeded → checked in）。
+    # 就绪探针每次 ping 都走一遍，应用自己那行 startup_complete 直接被埋掉。
+    # 按到 INFO 只是压掉协议噪音，报错和慢查询警告仍然出得来；真要看协议细节，
+    # 临时改这一行即可。
+    logging.getLogger("pymongo").setLevel(logging.INFO)
+
     renderer: structlog.types.Processor = (
         structlog.processors.JSONRenderer()
         if settings.is_production

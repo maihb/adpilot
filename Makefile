@@ -58,8 +58,10 @@ setup: ## 按 uv.lock 装依赖（含 dev）
 
 ##@ 开发
 
+# --reload-dir 限定到 src：不加的话 watchfiles 盯整个项目目录，改 tests/、
+# migrations/ 乃至 .claude/ 下的钩子脚本都会白重启一次，每次都要重连三个后端。
 dev: ## 起接口服务，热重载（依赖得先 make up）
-	$(UV) run uvicorn adpilot.main:app --reload
+	$(UV) run uvicorn adpilot.main:app --reload --reload-dir src
 
 fmt: ## 就地格式化 + 自动修可修的 lint（会改文件）
 	$(UV) run ruff format .
