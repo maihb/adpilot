@@ -34,6 +34,13 @@ x-app-env: &app-env
   # 告警推送。**空着是正常状态**：告警照样落库、接口照样查得到，只是不主动推。
   # 这个 URL 里带着 key，等于凭据 —— 和密码一样只从 .env 取。
   ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL:-}
+  # 认证。这三项用 `:-` 而不是上面那种 `:?`，是因为**空着不等于放行**：没有
+  # AUTH_SECRET 时认证层拒绝签发也拒绝校验，服务起得来但登录不了。让一台还没
+  # 填 .env 的机器能先 `docker compose up` 看见东西，比在这里卡住更符合
+  # 「陌生人 clone 五分钟跑起来」。真到了 ENVIRONMENT=prod，应用自己会拒绝启动。
+  AUTH_SECRET: ${AUTH_SECRET:-}
+  OPERATOR_USERNAME: ${OPERATOR_USERNAME:-admin}
+  OPERATOR_PASSWORD_HASH: ${OPERATOR_PASSWORD_HASH:-}
 
 x-backends: &backends
   postgres:

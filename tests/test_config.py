@@ -13,8 +13,9 @@ from __future__ import annotations
 
 from urllib.parse import unquote, urlsplit
 
+import pytest
 from kombu.utils.url import parse_url as kombu_parse_url
-from pydantic import SecretStr
+from pydantic import SecretStr, ValidationError
 
 from adpilot.config import Environment, Settings
 from adpilot.db.broker import create_celery_app
@@ -141,6 +142,50 @@ def test_clients_construct_when_nothing_is_configured() -> None:
     create_mongo_client(bare)
     create_redis_client(bare)
     create_celery_app(bare).close()
+
+
+def test_production_refuses_to_start_without_auth_configured() -> None:
+    """`ENVIRONMENT=prod` 缺认证配置就**起不来**，而不是起来了但没有认证。
+
+    判据用 ENVIRONMENT，和 `seed.py` 拒绝在生产执行是同一个套路。
+    """
+    password_hash = SecretStr("$argon2id$not-a-real-hash")
+
+    with pytest.raises(ValidationError, match="AUTH_SECRET"):
+        Settings(
+            _env_file=None,
+            environment=Environment.PROD,
+            operator_password_hash=password_hash,
+        )
+
+    # 配了但太短也不行：token 的 payload 是公开可读的，攻击者手里天然有一对
+    # （明文, 签名），密钥短了就是离线爆破的活靶子。
+    with pytest.raises(ValidationError, match="AUTH_SECRET"):
+        Settings(
+            _env_file=None,
+            environment=Environment.PROD,
+            auth_secret=SecretStr("太短了"),
+            operator_password_hash=password_hash,
+        )
+
+    with pytest.raises(ValidationError, match="OPERATOR_PASSWORD_HASH"):
+        Settings(
+            _env_file=None,
+            environment=Environment.PROD,
+            auth_secret=SecretStr("x" * 32),
+        )
+
+
+def test_non_production_starts_without_auth_configured() -> None:
+    """非生产环境不拦，理由写在 `config.py` 的那个校验器里。
+
+    要点是**空着不等于放行**：没有 AUTH_SECRET 时签发和校验双双拒绝工作，所以
+    没必要让一台还没填 .env 的机器连进程都起不来 —— 那会一起打掉「陌生人 clone
+    五分钟跑起来」和「只装了 Python 的机器上 pytest 全绿」。
+    """
+    settings = Settings(_env_file=None, environment=Environment.TEST)
+
+    assert not settings.auth_is_configured
 
 
 def test_secrets_do_not_leak_through_repr() -> None:

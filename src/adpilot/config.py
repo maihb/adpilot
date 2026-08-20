@@ -23,8 +23,13 @@ from enum import StrEnum
 from functools import lru_cache
 from urllib.parse import quote
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# `AUTH_SECRET` 的最小长度。token 的 payload 是公开可读的，攻击者手里天然有一对
+# （明文, 签名），所以密钥短了就是离线爆破的活靶子。`openssl rand -base64 32`
+# 出来的串正好在这个量级之上。
+AUTH_SECRET_MIN_LENGTH = 32
 
 
 class Environment(StrEnum):
@@ -112,10 +117,63 @@ class Settings(BaseSettings):
     # clone 下来最容易跑起来」这条判断标准。
     alert_webhook_url: SecretStr = Field(default=SecretStr(""))
 
+    # --- 认证：token 签发密钥 + 运营账号（D9 起）---
+    #
+    # 运营账号从环境变量来，**不建 `users` 表**：为一两个人做一套用户管理（增删改、
+    # 改密码、找回密码、权限分级）是典型的范围蔓延，而它们每一个都要接口、要页面、
+    # 要测试。多人共用一个运营账号在自托管小团队里是可接受的取舍，不是遗漏 ——
+    # 见[设计文档第五节](../../docs/design/2026-08-21-client-auth.md)。
+    auth_secret: SecretStr = Field(default=SecretStr(""))
+    operator_username: str = "admin"
+    # 🔴 存**哈希**不存明文。`.env` 一旦被谁贴进聊天窗口，明文就是直接可用的凭据。
+    # 生成方式：`uv run python -m adpilot.auth.password`。
+    operator_password_hash: SecretStr = Field(default=SecretStr(""))
+
     @property
     def alerts_are_pushed(self) -> bool:
         """配了 webhook 没有。判断收口在这里，调用方不去比对空字符串。"""
         return bool(self.alert_webhook_url.get_secret_value())
+
+    @property
+    def auth_is_configured(self) -> bool:
+        """签得出 token 没有。判断收口在这里，调用方不去比对空字符串。"""
+        return bool(self.auth_secret.get_secret_value())
+
+    @model_validator(mode="after")
+    def _require_auth_in_production(self) -> Settings:
+        """生产环境必须配齐认证，非生产放行。
+
+        **为什么不是一律必填。** 这两项空着的失败方向不一样，而
+        [CLAUDE.md](../../CLAUDE.md) 硬规矩 2 真正要挡的是「空值也能放行」：
+
+        * `OPERATOR_PASSWORD_HASH` 空着 = **谁也登不进来**（`auth/password.py` 的
+          `verify_password` 直接返回 False）。这是安全方向的失败。
+        * `AUTH_SECRET` 空着 = 签发和校验**双双拒绝工作**
+          （`auth/token.py` 的 `_key` 抛 `AuthNotConfiguredError`），不会退化成
+          「用空串当密钥」那种「看起来一切正常、实际上等于没有认证」。
+
+        既然两者都不会静默放行，就没必要让一台还没填 `.env` 的机器连进程都起不来
+        —— 那会一起打掉「陌生人 clone 五分钟跑起来」和「只装了 Python 的机器上
+        `uv run pytest` 全绿」这两条既有约定（`main.py` 在 import 时就会构造
+        应用，配置校验失败等于整套单元测试崩在收集阶段）。
+
+        到了 `prod` 判据翻转：那里没有「还没配」这种正当状态，缺了就大声失败。
+        判据用 `ENVIRONMENT` 与 `seed.py` 拒绝在生产执行是同一个套路。
+        """
+        if not self.is_production:
+            return self
+
+        secret = self.auth_secret.get_secret_value()
+        if len(secret) < AUTH_SECRET_MIN_LENGTH:
+            raise ValueError(
+                f"生产环境必须设置 AUTH_SECRET，且至少 {AUTH_SECRET_MIN_LENGTH} 个字符："
+                "openssl rand -base64 32"
+            )
+        if not self.operator_password_hash.get_secret_value():
+            raise ValueError(
+                "生产环境必须设置 OPERATOR_PASSWORD_HASH：uv run python -m adpilot.auth.password"
+            )
+        return self
 
     @property
     def postgres_dsn(self) -> str:

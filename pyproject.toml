@@ -22,6 +22,7 @@ dependencies = [
     "python-multipart>=0.0.32",
     "celery>=5.4",
     "httpx>=0.28",
+    "argon2-cffi>=25.1.0",
 ]
 
 [project.optional-dependencies]
@@ -159,7 +160,12 @@ layers = [
     # 规则里写一句 select(...) 会被这份契约当场拦下。architecture.md 把 rules 和
     # services 画在同一行说的是「都是业务逻辑」，依赖方向上则是 services 调 rules、
     # rules 谁也不认识 —— 那正是「规则只依赖数据，不依赖 IO」这条规矩的机器形态。
-    "rules",
+    #
+    # auth 摆在同一层出于同一个理由：token 的签发与校验是纯计算，够不着 models /
+    # db，所以「在校验里查一下这个 token 撤销没有」写不出来 —— 那正是设计文档
+    # 「自包含 token 不可撤销」这个决定的机器形态。邀请码需要状态（能作废、能列
+    # 出来），所以它走正常的 models → services 分层，不进 auth。
+    "auth | rules",
     "logging",
     "config",
 ]

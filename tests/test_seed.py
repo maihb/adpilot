@@ -253,6 +253,10 @@ def test_seed_refuses_production(monkeypatch: pytest.MonkeyPatch) -> None:
         postgres_password=SecretStr("x"),
         mongo_password=SecretStr("x"),
         rabbitmq_password=SecretStr("x"),
+        # 生产环境的 Settings 现在还要求认证配齐（config.py 的
+        # `_require_auth_in_production`），否则**构造这一步**就过不去。
+        auth_secret=SecretStr("x" * 32),
+        operator_password_hash=SecretStr("x"),
     )
     monkeypatch.setattr(seed, "get_settings", lambda: settings)
     monkeypatch.setattr(seed, "configure_logging", lambda _: None)
