@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import re
 import sys
+from pathlib import Path
 
 # --------------------------------------------------------------------------
 # 只读白名单
@@ -275,6 +276,32 @@ PIP_INSTALL_REASON = """守卫拦截：不要用 pip 装依赖。
 原因：pip 装进当前解释器，不写 pyproject.toml 也不更新 uv.lock。本机能跑、CI
 装不到 —— 这类差异要到 CI 红了才发现。"""
 
+# 会改变工作目录的命令。
+#
+# 🔴 **工作目录是会话级的，而 cd 没有回声。** 一条 `cd docs/design && grep ...` 跑完，
+# 后面每一条命令的相对路径都换了参照系 —— 而这件事不会有任何提示，直到几步之后
+# 某条命令莫名找不到文件，或者更糟：在你以为是仓库根的地方写出了文件。
+DIR_CHANGERS = {"cd", "pushd", "popd"}
+
+# 项目根。**锚在 `__file__` 上而不是 cwd** —— 守卫要保护的正是 cwd，拿它当判据
+# 等于让被保护的东西自己作证。守卫住在 <repo>/.claude/ 下，往上两级就是根。
+REPO_ROOT = str(Path(__file__).resolve().parent.parent)
+
+
+def _cd_reason(name: str, tokens: list[str]) -> str:
+    target = " ".join(tokens[1:]) or "（家目录）"
+    return f"""守卫拦截：不要用 {name} 切换工作目录（目标：{target}）。
+  访问项目内的文件一律用相对路径，pwd 始终是仓库根：
+      grep -n x docs/design/*.md          不是  cd docs/design && grep -n x *.md
+      uv run pytest tests/test_seed.py    不是  cd tests && uv run pytest ...
+  确实要在别处执行：用命令自带的目录参数，它们都不动 pwd
+      git -C <dir> …    make -C <dir> …    docker compose -f <file> …
+      find <dir> …      ruff check <dir>   tar -C <dir> …
+  读项目外的文件：直接给绝对路径，同样不必 cd
+  **pwd 已经跑偏了要修回来**：cd {REPO_ROOT}   ← 只有这一条是放行的
+原因：见 DIR_CHANGERS 那段注释 —— cd 的代价不在当前这条命令，在后面每一条。"""
+
+
 DOWN_VOLUMES_REASON = """守卫拦截：docker compose down -v 会删掉数据卷。
   只停容器：docker compose down
   确实要清库重来：先说清楚要清哪个，再单独删那一个卷
@@ -436,6 +463,13 @@ def blocked(cmd: str) -> str | None:
             if any(SECRET_PATH.search(a) for a in args):
                 return GIT_ADD_SECRET_REASON
 
+        if name in DIR_CHANGERS:
+            # 唯一的逃生口：回仓库根。跑偏之后总得有条路回来，而这条路本身
+            # 不会把 pwd 带到任何新地方 —— 拦掉它只会让「已经偏了」变成死局。
+            if name == "cd" and len(rest) == 1 and rest[0].rstrip("/") == REPO_ROOT:
+                continue
+            return _cd_reason(name, tokens)
+
         if name in ("pip", "pip3") and rest[:1] in (["install"], ["uninstall"]):
             return PIP_INSTALL_REASON
         if name.startswith("python") and rest[:2] == ["-m", "pip"]:
@@ -468,21 +502,46 @@ def blocked(cmd: str) -> str | None:
 # --------------------------------------------------------------------------
 
 
+def _inside_repo(target: str) -> bool:
+    """`-C` 的目标是否落在本仓库内。
+
+    🔴 **相对路径按 `REPO_ROOT` 解析，而这一步之所以成立，是因为 `cd` 已经被
+    `DIR_CHANGERS` 钉死了** —— pwd 恒等于仓库根，守卫才敢把 `docs` 解释成
+    `<repo>/docs`。**这两条规则是一对**：哪天放开了 cd，pwd 就不再可预测，
+    这里的解析会从「保守」变成「错」，得连着改回去。
+
+    `Path("/a") / "/b"` 会丢掉左边直接得到 `/b`，所以绝对路径目标天然走的是
+    「按它自己算」那条路，不需要特判。`resolve()` 跟随符号链接，指向仓库外的
+    链接因此也逃不掉 —— 那正是要拦的形态。
+    """
+    root = Path(REPO_ROOT)
+    try:
+        resolved = (root / target).resolve()
+    except (OSError, ValueError):
+        return False
+    return resolved == root or root in resolved.parents
+
+
 def git_ok(tokens: list[str]) -> bool:
-    """git 的参数级判定：子命令必须只读，且不得带 -C。
+    """git 的参数级判定：子命令必须只读，`-C` 的目标必须在本仓库内。
 
-    `-C` 换的是工作目录，而那个目录不受本仓库这套护栏约束 —— 同一条
-    `git push` 在 settings.json 里是 deny，加个 `-C ../别的仓库` 就绕过去了
-    （deny 是按命令前缀匹配的，`git -C ... push` 不以 `git push` 开头）。
+    **为什么盯着 `-C`**：它换的是工作目录，而那个目录不受本仓库这套护栏约束 ——
+    同一条 `git push` 在 settings.json 里是 deny，加个 `-C ../别的仓库` 就绕过去
+    了（deny 按命令前缀匹配，`git -C ... push` 不以 `git push` 开头）。deny 里那条
+    `Bash(git -C:*)` 已放开，为的是能读写相邻仓库；挡住它的就只剩这里。
 
-    deny 里那条 `Bash(git -C:*)` 已放开，为的是能读写相邻仓库；挡住它的就
-    只剩这里 —— 带 `-C` 一律不自动放行，每次交给人确认。
+    以前是**一刀切拒绝**，因为守卫没法知道 `-C docs` 到底指向哪 —— pwd 那时是会
+    飘的。`cd` 被钉死之后这个前提变了，所以改成按目标判：仓库内 + 子命令只读才
+    自动放行，指向仓库外的（`-C ../别的仓库`）仍然每次交给人确认。
     """
     i = 1
     while i < len(tokens):
         tok = tokens[i]
         if tok == "-C":
-            return False
+            if i + 1 >= len(tokens) or not _inside_repo(tokens[i + 1]):
+                return False
+            i += 2
+            continue
         if tok in ("--no-pager", "-P", "--paginate"):
             i += 1
             continue

@@ -38,6 +38,10 @@ guard = _load_guard()
 READONLY_COMMANDS = [
     "git status",
     "git log --oneline -10",
+    # git -C 指向仓库内 + 只读子命令。这条能自动放行的前提是 cd 被钉死了 ——
+    # pwd 恒等于仓库根，"docs" 才解释得出唯一的目标
+    "git -C docs log --oneline -3",
+    "git -C . status",
     "git --no-pager diff src/adpilot/config.py",
     "git show HEAD --stat",
     "ls -la src/adpilot",
@@ -125,6 +129,16 @@ NOT_READONLY_COMMANDS = [
     "uv run python -c 'print(1)'",
     # 沾 .env 的一律不自动放行
     "grep POSTGRES .env",
+    # 🔴 git -C 指向仓库外：deny 是按前缀匹配的，`git -C ../x push` 不以
+    # `git push` 开头，自动放行等于给那条 deny 开了个后门
+    "git -C ../other-repo log --oneline",
+    "git -C /Users/x/other-repo status",
+    "git -C docs/../.. log",
+    # 仓库内也只放行只读子命令
+    "git -C docs push",
+    "git -C . commit -m x",
+    # -C 后面什么都没有，判不了目标
+    "git -C",
 ]
 
 
@@ -156,10 +170,21 @@ BLOCKED_COMMANDS = [
     "pytest -q",
     "mypy src tests",
     "ruff check .",
-    "cd /Users/x/code/adpilot && pytest tests/test_health.py",
+    # 复合命令里的裸工具同样要抓到（原本这条带着 cd 前缀，后来 cd 自己成了
+    # 拦截规则，会抢先命中 —— 那样这条就不再验它本来要验的东西了）
+    "uv run ruff check . && pytest tests/test_health.py",
     "python -m pytest",
     # 数据卷删了就没了
     "docker compose down -v",
+    # 工作目录不许乱跳：cd 之后每一条命令的相对路径都换了参照系，而且没有回声
+    "cd docs/design && grep -n 认证 *.md",
+    "cd ..",
+    "cd",
+    "cd -",
+    "pushd tests",
+    "popd",
+    # 项目内的子目录也不行 —— 「跳进去再用相对路径」正是要挡的那个习惯
+    f"cd {guard.REPO_ROOT}/docs",
 ]
 
 
@@ -184,6 +209,17 @@ ALLOWED_THROUGH_COMMANDS = [
     # 引号里的字样不是命令 —— 这条曾经在隔壁仓库真实误伤过一次提交
     "git commit -m '给 pytest 夹具加了 offline_client'",
     'echo "记得先 pip install 吗？不，用 uv add"',
+    # 回仓库根是唯一放行的 cd：pwd 跑偏之后总得有条路回来，拦掉它只会把
+    # 「已经偏了」变成死局
+    f"cd {guard.REPO_ROOT}",
+    f"cd {guard.REPO_ROOT}/",
+    # 带目录参数的命令不动 pwd，正是 cd 的替代品，不能连它们一起挡了
+    "git -C docs log --oneline -3",
+    "make -C client build",
+    "find docs/design -name '*.md'",
+    # 🔴 引号里的 cd 是**容器内**的工作目录，跟宿主的 pwd 无关。误拦这条会让
+    # 「进容器跑一条命令」这个正常操作彻底走不通
+    "docker compose run --rm api sh -c 'cd /app && alembic upgrade head'",
 ]
 
 
