@@ -21,6 +21,7 @@
       "Bash(make revision:*)",
       "Bash(make seed)",
       "Bash(make up)",
+      "Bash(make rebuild)",
       "Bash(make down)",
       "Bash(make logs)",
       "Bash(make ps)",

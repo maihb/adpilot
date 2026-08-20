@@ -26,7 +26,7 @@ COMPOSE ?= docker compose
 
 .DEFAULT_GOAL := help
 
-.PHONY: help bootstrap env setup dev worker beat seed lint fmt types imports test test-int check migrate revision up down logs ps
+.PHONY: help bootstrap env setup dev worker beat seed lint fmt types imports test test-int check migrate revision up rebuild down logs ps
 
 help: ## 显示这份清单
 	@awk 'BEGIN {FS = ":.*##"} \
@@ -136,6 +136,12 @@ revision: ## 按 models/ 的改动生成迁移草稿：make revision m='说明'
 
 up: ## 起依赖服务（后台）
 	$(COMPOSE) up -d
+
+rebuild: ## 改了代码或依赖之后：重建镜像再换上去
+	# `up -d` 认的是「容器在不在跑」，不是「镜像新不新」—— 代码改了它照样把旧镜像
+	# 拉起来，症状是「我明明改了，接口还是老样子」，而且没有任何提示。
+	# 三个应用进程共用一个镜像，所以这一条会把 api / worker / beat 一起换掉。
+	$(COMPOSE) up -d --build
 
 down: ## 停容器。数据卷保留 —— 这里永远不会加 -v
 	$(COMPOSE) down

@@ -162,6 +162,11 @@ uv run alembic revision --autogenerate -m "..."  # 生成迁移草稿，**必须
 uv run alembic check                             # 改了 model 却忘了生成迁移就报错
 
 docker compose up -d
+
+# 改了代码或依赖之后。`up -d` 认的是「容器在不在跑」不是「镜像新不新」——
+# 少了 --build 它会把旧镜像照样拉起来，而症状是「明明改了，接口还是老样子」。
+docker compose up -d --build
+
 docker compose logs -f api
 ```
 

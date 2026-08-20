@@ -161,7 +161,7 @@ make migrate      # 把库升到最新 schema
 make seed         # 灌脱敏示例数据（先 make migrate）
 make revision m='加一列 xxx'   # 改完 models/ 生成迁移草稿，**要人看一遍再提交**
 make test-int     # 集成测试，需要 make up 那套环境 + 先 make migrate
-make up / down / logs
+make up / rebuild / down / logs   # rebuild = 改了代码之后重建镜像再换上去
 ```
 
 make 只是短名字，没有额外逻辑 —— 每个 target 展开成什么，`make -n <target>` 一看

@@ -185,7 +185,7 @@ make migrate      # bring the database up to the latest schema
 make seed         # load anonymised sample data (run make migrate first)
 make revision m='add column xxx'   # draft a migration after editing models/ — **review it before committing**
 make test-int     # integration tests, needs the `make up` stack + `make migrate` first
-make up / down / logs
+make up / rebuild / down / logs   # rebuild = rebuild the image after a code change
 ```
 
 make is shorthand, not logic — `make -n <target>` shows exactly what a target
