@@ -13,11 +13,13 @@ schema 怎么演进、autogenerate 有哪些盲区，见
 from __future__ import annotations
 
 from adpilot.models.ad_account import AdAccount, Platform
+from adpilot.models.balance import Balance
 from adpilot.models.client import Client
 from adpilot.models.daily_metric import DailyMetric, MetricLevel
 
 __all__ = [
     "AdAccount",
+    "Balance",
     "Client",
     "DailyMetric",
     "MetricLevel",

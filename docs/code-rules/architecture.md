@@ -3,10 +3,10 @@
 技术选型的来龙去脉在[设计文档第四节](../design/2026-08-19-mvp-design.md)，这里只讲
 **代码怎么摆、依赖往哪个方向走**。
 
-> **进度**：D1–D5 完成，D6 过半 —— 骨架、四个客户端、`models/` + Alembic 迁移、
-> `schemas/`、`services/`、`providers/` 都已落地；`tasks/` 也建起来了，导入完会
-> 自动排一个归一化任务，worker 在另一个进程里跑它。下面仍标 🚧 的目录还不存在
-> —— 先把位置定下来，是为了三个人（或三个 agent）各写各的时候不会摆出三套结构。
+> **进度**：D1–D7 完成 —— 骨架、四个客户端、`models/` + Alembic 迁移、`schemas/`、
+> `services/`、`providers/`、`tasks/`（导入完自动排归一化，worker 在另一个进程里跑）
+> 和 `rules/`（余额可撑天数与告警）都已落地。下面仍标 🚧 的目录还不存在 —— 先把
+> 位置定下来，是为了三个人（或三个 agent）各写各的时候不会摆出三套结构。
 
 ---
 
@@ -39,7 +39,8 @@ src/adpilot/
   tasks/            Celery 任务：任务体只做编排，逻辑仍在 services/
     app.py          worker 入口（`celery -A adpilot.tasks.app`）+ 重试策略基类
     runtime.py      同步的 Celery ↔ async 业务代码；**两个致命坑写在它的 docstring 里**
-  rules/        🚧  规则引擎：余额可撑天数、断货预警、指标异动。纯函数，好测
+  rules/            规则引擎：纯函数，数据进、判定出。**够不着数据库，契约保证**
+    balance.py      余额可撑天数与告警阈值（断货、指标异动还没做）
   llm/          🚧  LLM 适配器与提示词，输出必须过 Pydantic 校验
 tests/
   conftest.py       夹具：offline_*（不连外部服务）与 live_*（连真实服务）
@@ -66,11 +67,13 @@ grep 一次就能找齐。
 ```
 config / logging          ← 谁都能 import，它们谁都不 import
       ↑
+rules                     ← 纯函数：数据进、判定出。**够不着上面任何一层**
+      ↑
 db / providers / llm      ← 基础设施：连接、外部系统适配
       ↑
 models → schemas          ← 数据形状
       ↑
-services / rules          ← 业务逻辑。**不认识 HTTP**
+services                  ← 业务逻辑。**不认识 HTTP**；查好数据后调 rules
       ↑
 resources                 ← 进程级资源容器
       ↑
@@ -88,7 +91,9 @@ main                      ← 组装（只组装 api；worker 的入口是 tasks
    一个 handler 里出现 `if` 套 `if` 的业务分支，说明那段该在 `services/`。
 3. **`rules/` 只依赖数据，不依赖 IO。** 规则引擎收的是已经查好的数据结构，返回
    判定结果，**不自己查库**。这条是为了让「余额还能撑几天」这类计算能用一张表格
-   式的参数化测试覆盖完，而不必起数据库。
+   式的参数化测试覆盖完，而不必起数据库。所以它在图上被压到了很低的位置 ——
+   低到够不着 `models` / `schemas` / `db`，写一句 `select(...)` 会被契约当场拦下。
+   「规则和业务逻辑是一层」说的是职责，依赖方向上是 `services` 调 `rules`。
 4. **`llm/` 不做决策。** 只把结构化输入变成结构化输出，边界见
    [设计文档第五节](../design/2026-08-19-mvp-design.md)。
 5. **`api/` 与 `tasks/` 互不 import。** `tasks/` 认识 `api/` 意味着 worker 里出现
@@ -181,7 +186,7 @@ result backend 由接口去查（`GET /api/tasks/{id}`）。worker **不回调**
 | 一个接口 | `api/<entity>.py` + `schemas/<entity>.py` | `api/health.py`，步骤见 [`api.md`](api.md) |
 | 一张表 | `models/<entity>.py` + 一份 Alembic 迁移 | 见 [`conventions.md` 数据库一节](conventions.md#数据库与迁移) |
 | 一段业务逻辑 | `services/<entity>.py` | 纯 async 函数，第一个参数是 session |
-| 一条判定规则（阈值、告警） | `rules/<rule>.py` | 纯函数：数据进、判定出，不查库 |
+| 一条判定规则（阈值、告警） | `rules/<rule>.py` | `rules/balance.py`；纯函数：数据进、判定出，不查库。查库那半边写在 `services/<rule>.py` |
 | 一个数据源 | `providers/<platform>.py` | 实现 `ReportProvider` 协议，注册进注册表 |
 | 一个后台任务 | `tasks/<domain>.py` | `tasks/normalize.py`；任务体只做编排，逻辑仍在 `services/`。**别忘了在 `tasks/app.py` 的 `TASK_MODULES` 里加一行**，否则 worker 认不出这个任务 |
 

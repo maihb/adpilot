@@ -146,6 +146,11 @@ layers = [
     # providers 只认外部格式、db 只管连接（含 RabbitMQ 的接线），两者各自独立正是
     # architecture.md 那张图想表达的。
     "providers | db",
+    # rules 压在这么低的位置是**故意的**：它够不着 models、schemas、db，所以想在
+    # 规则里写一句 select(...) 会被这份契约当场拦下。architecture.md 把 rules 和
+    # services 画在同一行说的是「都是业务逻辑」，依赖方向上则是 services 调 rules、
+    # rules 谁也不认识 —— 那正是「规则只依赖数据，不依赖 IO」这条规矩的机器形态。
+    "rules",
     "logging",
     "config",
 ]
