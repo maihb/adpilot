@@ -23,6 +23,7 @@ from adpilot.api import (
     health,
     imports,
     invite,
+    portal,
     task,
 )
 from adpilot.api.deps import require_operator
@@ -77,6 +78,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(health.router, prefix=settings.api_prefix)
     # 换 token 的入口自己不能要 token。
     app.include_router(auth.router, prefix=settings.api_prefix)
+    # 客户端：作用域依赖写在每个路由自己身上（`ClientScopeDep` 是个有返回值的
+    # 依赖，handler 要用它解出来的 client_id），所以这里不像下面那样统一挂。
+    # 漏声明一个会被 tests/test_auth_guard.py 拦下 —— 那条测试遍历
+    # openapi.json，要求 /api/portal/ 下的每个接口都要 ClientBearer。
+    app.include_router(portal.router, prefix=settings.api_prefix)
 
     # 其余全部要运营身份。**统一在这里挂，不逐个 handler 写** —— 写在 handler 上
     # 的话，漏掉一个不会有任何报错，只会变成一条谁都能调的接口。这里漏掉一个则会

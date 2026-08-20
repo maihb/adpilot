@@ -59,6 +59,27 @@ async def get(session: AsyncSession, account_id: int) -> AdAccount:
     return account
 
 
+async def get_for_client(session: AsyncSession, account_id: int, *, client_id: int) -> AdAccount:
+    """取一个账户，**且它必须属于这个客户**；不属于就跟不存在一样抛 `NotFoundError`。
+
+    🔴 **客户端那条路径上的每一次「按 account_id 查」都必须先过这里。** 它是
+    `/api/portal/*` 上唯一的越权入口 —— 路径里带着一个别人的 ID，而别的入参都
+    来自 token。
+
+    404 而不是 403：403 等于承认「这个账户存在，只是不给你看」，那本身就是一条
+    情报。对合法调用方来说两者没有区别，他本来就查不到不属于自己的账户。
+
+    `client_id` 是**必填关键字参数**，没有默认值 —— 这是设计文档那两层机器保证的
+    第二层：忘了传就根本调不通，而不是「忘了传就查到全部」。
+    """
+    account = await session.scalar(
+        select(AdAccount).where(AdAccount.id == account_id, AdAccount.client_id == client_id)
+    )
+    if account is None:
+        raise NotFoundError(f"广告账户不存在：{account_id}")
+    return account
+
+
 async def list_page(
     session: AsyncSession,
     *,

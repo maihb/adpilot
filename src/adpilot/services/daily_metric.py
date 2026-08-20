@@ -11,6 +11,8 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from adpilot.models.daily_metric import DailyMetric, MetricLevel
+from adpilot.services import ad_account as ad_account_service
+from adpilot.services.exceptions import InvalidDataError
 
 # 🔴 **把某个账户的指标汇总到「账户维度」时，只用其中一个层级的行，不是全部加起来。**
 #
@@ -85,6 +87,107 @@ async def list_by_account(
         .limit(page_size)
     )
     return rows.all(), total or 0
+
+
+#: 客户端一次能问的最长区间。挡的不是恶意，是「把 start 填成 2020-01-01」那种
+#: 手滑 —— 那会让一次查询扫出几千行再全序列化出去。90 天覆盖「近三个月」这个
+#: 最长的常规诉求。
+MAX_CLIENT_RANGE_DAYS = 92
+
+
+@dataclass(frozen=True, slots=True)
+class DaySeriesRow:
+    """客户端看板要的一天：一行数字，不分层级、不分对象。"""
+
+    stat_date: date
+    spend: Decimal
+    impressions: int
+    clicks: int
+    conversions: Decimal
+    revenue: Decimal
+
+
+@dataclass(frozen=True, slots=True)
+class DaySeries:
+    """一段时间线，外加读懂它所必需的两样东西。"""
+
+    rows: list[DaySeriesRow]
+
+    #: 账户币种。**金额脱离币种没有意义**，而客户可能同时有 USD 和 CNY 的账户。
+    currency: str
+
+    #: 账户时区。`stat_date` 是这个时区下的自然日 —— 日报和看板都必须注明口径，
+    #: 否则客户拿他自己后台的数字来对，永远差一截（glossary 的「时间口径」）。
+    timezone: str
+
+
+async def series_for_client(
+    session: AsyncSession,
+    *,
+    client_id: int,
+    account_id: int,
+    start: date,
+    end: date,
+) -> DaySeries:
+    """客户端看板的时间线：一天一行，闭区间。
+
+    `client_id` 是**必填关键字参数**，且第一件事就是确认账户属于他 —— 想在这条
+    路径上写出「查全部客户的指标」是做不到的（设计文档第三节那两层保证的第二层）。
+
+    **不分页也不暴露层级。** 客户要的是一条能画成折线的时间线，而层级是内部概念：
+    同一天既有账户级又有系列级时两者不能相加（`LEVEL_PRIORITY`），把这个选择交给
+    小程序端，迟早会有人把花费显示成双倍。这里逐天按优先级挑，和
+    `totals_on_days` 是同一套规则。
+
+    没有数据的那天**不出现在结果里**，不补零 —— 调用方要能分清「那天花了 0」和
+    「那天没导入」。
+    """
+    if start > end:
+        raise InvalidDataError("开始日期不能晚于结束日期")
+    if (end - start).days >= MAX_CLIENT_RANGE_DAYS:
+        raise InvalidDataError(f"一次最多查 {MAX_CLIENT_RANGE_DAYS} 天")
+
+    account = await ad_account_service.get_for_client(session, account_id, client_id=client_id)
+
+    rows = await session.execute(
+        select(
+            DailyMetric.stat_date,
+            DailyMetric.level,
+            func.coalesce(func.sum(DailyMetric.spend), 0),
+            func.coalesce(func.sum(DailyMetric.impressions), 0),
+            func.coalesce(func.sum(DailyMetric.clicks), 0),
+            func.coalesce(func.sum(DailyMetric.conversions), 0),
+            func.coalesce(func.sum(DailyMetric.revenue), 0),
+        )
+        .where(
+            DailyMetric.account_id == account_id,
+            DailyMetric.stat_date.between(start, end),
+        )
+        .group_by(DailyMetric.stat_date, DailyMetric.level)
+    )
+
+    by_day: dict[date, dict[MetricLevel, DaySeriesRow]] = {}
+    for day, level, spend, impressions, clicks, conversions, revenue in rows:
+        by_day.setdefault(day, {})[level] = DaySeriesRow(
+            stat_date=day,
+            spend=Decimal(spend),
+            impressions=int(impressions),
+            clicks=int(clicks),
+            conversions=Decimal(conversions),
+            revenue=Decimal(revenue),
+        )
+
+    # 层级**逐天**挑，不是全区间挑一次：某天只导了系列级、另一天导了账户级是完全
+    # 正常的，按天各挑各的才不会把其中一天算丢（同 `totals_on_days`）。
+    picked: list[DaySeriesRow] = []
+    for day in sorted(by_day):
+        for level in LEVEL_PRIORITY:
+            row = by_day[day].get(level)
+            if row is not None:
+                picked.append(row)
+                break
+
+    return DaySeries(rows=picked, currency=account.currency, timezone=account.timezone)
 
 
 async def window_totals(

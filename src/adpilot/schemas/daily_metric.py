@@ -34,26 +34,20 @@ def _divide(numerator: Decimal, denominator: Decimal) -> Decimal | None:
     return (numerator / denominator).quantize(_SCALE)
 
 
-class DailyMetricItem(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
+class DerivedMetrics(BaseModel):
+    """五个基础数字，外加由它们现算出来的派生指标。
 
-    stat_date: date
-    level: MetricLevel
-    object_id: str
-    object_name: str | None
-
-    #: 账户币种，**不是人民币**。跨账户汇总前必须先说清楚要不要换算。
-    currency: str
+    **单独一个基类，是为了让两套出参共用「算法」而不共用「形状」**：内部的
+    `DailyMetricItem` 和客户端的 `PortalMetricDay` 各自声明自己的字段，公式却只有
+    这一份。公式抄第二遍的代价是「CPA 在两个页面上不一样」——那种 bug 没人会想到
+    去查两个 schema。
+    """
 
     spend: Decimal
     impressions: int
     clicks: int
     conversions: Decimal
     revenue: Decimal
-
-    #: 🔴 跨天不可加：同一个人两天都被触达，相加会把他算两次。周期汇总的 reach
-    #: 必须向平台单独请求那个周期的值。可空是因为平台不一定给。
-    reach: int | None
 
     @computed_field  # type: ignore[prop-decorator]  # pydantic 的装饰器与 property 的组合，mypy 认不出
     @property
@@ -80,6 +74,24 @@ class DailyMetricItem(BaseModel):
     @property
     def roas(self) -> Decimal | None:
         return _divide(self.revenue, self.spend)
+
+
+class DailyMetricItem(DerivedMetrics):
+    """内部接口的一行：带层级和对象，客户端那套没有这几样。"""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    stat_date: date
+    level: MetricLevel
+    object_id: str
+    object_name: str | None
+
+    #: 账户币种，**不是人民币**。跨账户汇总前必须先说清楚要不要换算。
+    currency: str
+
+    #: 🔴 跨天不可加：同一个人两天都被触达，相加会把他算两次。周期汇总的 reach
+    #: 必须向平台单独请求那个周期的值。可空是因为平台不一定给。
+    reach: int | None
 
 
 class DailyMetricListResponse(BaseModel):

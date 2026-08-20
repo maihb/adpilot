@@ -156,6 +156,46 @@ async def list_alerts(
     return rows.all(), total or 0
 
 
+async def list_for_client(
+    session: AsyncSession,
+    *,
+    client_id: int,
+    only_open: bool,
+    page: int,
+    page_size: int,
+) -> tuple[Sequence[Alert], int]:
+    """客户端那条路径上的告警清单。`client_id` 必填，不给根本调不通。
+
+    过滤靠一次 JOIN 回 `ad_accounts`：告警挂在账户上，账户挂在客户上。**不接受
+    `account_id` 入参** —— 客户要的是「我这边有什么要注意的」，而按账户筛这件事
+    会多出一个需要校验归属的入口，收益却只是少几行。
+
+    默认只给未解决的：客户看的是当下，不是台账。历史（含已解决）要显式要。
+    """
+    filters = [AdAccount.client_id == client_id]
+    if only_open:
+        filters.append(Alert.status == AlertStatus.OPEN.value)
+
+    scoped = select(Alert).join(AdAccount, Alert.account_id == AdAccount.id).where(*filters)
+
+    total = await session.scalar(
+        select(func.count())
+        .select_from(Alert)
+        .join(AdAccount, Alert.account_id == AdAccount.id)
+        .where(*filters)
+    )
+    rows = await session.scalars(
+        scoped.order_by(
+            case((Alert.status == AlertStatus.OPEN.value, 0), else_=1),
+            Alert.opened_at.desc(),
+            Alert.id.desc(),
+        )
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    )
+    return rows.all(), total or 0
+
+
 async def _findings_for(session: AsyncSession, account: AdAccount) -> list[Finding]:
     findings: list[Finding] = []
 

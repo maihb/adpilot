@@ -110,6 +110,21 @@ async def alert_for_account(session: AsyncSession, account_id: int) -> BalanceAl
     return await _alert(session, account)
 
 
+async def runway_for_client(
+    session: AsyncSession,
+    *,
+    client_id: int,
+    account_id: int,
+) -> BalanceAlert | None:
+    """客户端那条路径上的可撑天数。`client_id` 必填，不给根本调不通。
+
+    从没录过余额就返回 `None` —— 那是「不知道」，不是「没事」，出参那边会照直
+    说（同 `alert_for_account`）。
+    """
+    account = await ad_account_service.get_for_client(session, account_id, client_id=client_id)
+    return await _alert(session, account)
+
+
 async def alerts(session: AsyncSession, *, only_alerting: bool = True) -> list[BalanceAlert]:
     """扫一遍所有**在投**的账户。
 
