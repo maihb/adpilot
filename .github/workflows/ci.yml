@@ -41,6 +41,10 @@ jobs:
       - name: Mypy
         run: uv run mypy src tests
 
+      # 契约就是 docs/code-rules/architecture.md 的那张分层图，配置在 pyproject.toml
+      - name: Layered imports
+        run: uv run lint-imports
+
       - name: Unit tests
         run: uv run pytest --cov=adpilot --cov-report=term-missing
 

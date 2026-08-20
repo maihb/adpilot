@@ -15,18 +15,18 @@
 # 只看得见命令行上的 `make xxx`、看不见 Makefile 里这些行。一条通配规则就等于给
 # 「密钥不进上下文」「依赖只经 uv 装」那几道拦截开了后门。
 #
-# check 的真相源是 .github/workflows/ci.yml —— 四道门禁必须与它同序同命令。
+# check 的真相源是 .github/workflows/ci.yml —— 五道门禁必须与它同序同命令。
 
 UV      ?= uv
 COMPOSE ?= docker compose
 
-# check 的四道门禁按 CI 的顺序串行跑，-j 下也不许打乱：先 lint 后 test，
+# check 的五道门禁按 CI 的顺序串行跑，-j 下也不许打乱：先 lint 后 test，
 # 才能在格式问题上快速失败，而不是等跑完测试再报一个空行。
 .NOTPARALLEL:
 
 .DEFAULT_GOAL := help
 
-.PHONY: help bootstrap env setup dev lint fmt types test test-int check migrate revision up down logs ps
+.PHONY: help bootstrap env setup dev lint fmt types imports test test-int check migrate revision up down logs ps
 
 help: ## 显示这份清单
 	@awk 'BEGIN {FS = ":.*##"} \
@@ -76,13 +76,16 @@ lint: ## ruff 检查 + 格式核对，不改文件
 types: ## mypy strict
 	$(UV) run mypy src tests
 
+imports: ## 分层依赖契约：services 不许 import api 那张图
+	$(UV) run lint-imports
+
 test: ## 单元测试，不需要任何外部服务
 	$(UV) run pytest
 
 test-int: ## 集成测试，需要 make up 那套环境 + 先 make migrate
 	RUN_INTEGRATION=1 $(UV) run pytest -m integration
 
-check: lint types test ## 推送前跑这条：CI 卡的四道门禁，一次跑完
+check: lint types imports test ## 推送前跑这条：CI 卡的五道门禁，一次跑完
 
 ##@ 数据库迁移
 

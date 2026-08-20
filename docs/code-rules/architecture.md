@@ -87,10 +87,13 @@ main                      ← 组装
 4. **`llm/` 不做决策。** 只把结构化输入变成结构化输出，边界见
    [设计文档第五节](../design/2026-08-19-mvp-design.md)。
 
-> ⚠️ **这四条目前没有机器强制**，靠 review 守着 —— 和本仓库「规矩要写成门禁」的
-> 主张有出入，属于已知欠账。落地 `services/` 的那个 PR 里补
-> [import-linter](https://import-linter.readthedocs.io/) 并挂进 CI，契约就是上面
-> 这张图。在那之前，改动跨了层要在 PR 描述里说明。
+> ✅ **这四条有机器强制了**：[import-linter](https://import-linter.readthedocs.io/)
+> 的 layers 契约跑在 CI 里（本地是 `make imports`），配置在 `pyproject.toml`，
+> **层的顺序就是上面这张图** —— 改了图就要去改那份配置，反过来也一样。
+>
+> 契约开着 `exhaustive`：`adpilot` 下新增一个顶层模块必须先在分层表里占个位置，
+> 否则契约本身就红。这是刻意的 —— `providers/` `rules/` `llm/` `tasks/` 都还没
+> 建，建之前先想清楚它摆在哪一层，比建完之后再来考古依赖便宜得多。
 
 ---
 

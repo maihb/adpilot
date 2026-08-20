@@ -40,6 +40,7 @@ run "format" uv run ruff format --check .
 if [ "$py_changed" -eq 1 ]; then
     run "ruff" uv run ruff check .
     run "mypy" uv run mypy src tests
+    run "imports" uv run lint-imports
     run "pytest" uv run pytest
 fi
 

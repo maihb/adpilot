@@ -29,6 +29,7 @@ dev = [
     "pytest-asyncio>=0.24",
     "pytest-cov>=6.0",
     "httpx>=0.28",
+    "import-linter>=2.13",
 ]
 
 [project.urls]
@@ -99,4 +100,40 @@ asyncio_mode = "auto"
 addopts = "-q --strict-markers"
 markers = [
     "integration: 需要真实的 PostgreSQL/MongoDB/Redis，设 RUN_INTEGRATION=1 才跑",
+]
+
+# ---------------------------------------------------------------------------
+# 分层依赖契约
+#
+# architecture.md 的那张分层图，到这里才成为机器判定。在此之前它只是一段文字，
+# 而「services/ 不许 import api/」恰恰是 review 时最容易放过去的一类违规：加一行
+# import 看起来完全无害，直到 D6 的 Celery worker 调同一个服务函数时，因为拿不出
+# 请求对象而炸——那时改起来已经不是删一行 import 的事了。
+#
+# layers 自上而下、由高到低：**高层可以 import 低层，反过来就是违约**。
+# ---------------------------------------------------------------------------
+
+[tool.importlinter]
+root_package = "adpilot"
+
+[[tool.importlinter.contracts]]
+name = "分层依赖只能自下而上"
+type = "layers"
+# containers 是 exhaustive 的前提：没有它，import-linter 不知道该拿哪个包下的
+# 模块清单去比对「有没有漏列的」。
+containers = ["adpilot"]
+# exhaustive：adpilot 下新增的顶层模块必须在这张表里有位置，否则契约本身就红。
+# 这条是刻意的 —— providers / rules / llm / tasks 都还没建，建的那天要先想清楚
+# 它们摆在哪一层，而不是等依赖绕成一团之后再来考古。
+exhaustive = true
+layers = [
+    "main",
+    "api",
+    "resources",
+    "services",
+    "schemas",
+    "models",
+    "db",
+    "logging",
+    "config",
 ]
