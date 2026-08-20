@@ -469,7 +469,15 @@ def blocked(cmd: str) -> str | None:
 
 
 def git_ok(tokens: list[str]) -> bool:
-    """git 的参数级判定：子命令必须只读，且不得带 -C（deny 里禁的）。"""
+    """git 的参数级判定：子命令必须只读，且不得带 -C。
+
+    `-C` 换的是工作目录，而那个目录不受本仓库这套护栏约束 —— 同一条
+    `git push` 在 settings.json 里是 deny，加个 `-C ../别的仓库` 就绕过去了
+    （deny 是按命令前缀匹配的，`git -C ... push` 不以 `git push` 开头）。
+
+    deny 里那条 `Bash(git -C:*)` 已放开，为的是能读写相邻仓库；挡住它的就
+    只剩这里 —— 带 `-C` 一律不自动放行，每次交给人确认。
+    """
     i = 1
     while i < len(tokens):
         tok = tokens[i]

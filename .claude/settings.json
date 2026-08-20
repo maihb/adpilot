@@ -128,7 +128,6 @@
       "Bash(rm -rf:*)",
       "Bash(sed -i:*)",
       "Bash(awk -i:*)",
-      "Bash(git -C:*)",
       "Bash(git push:*)",
       "Bash(gh auth token:*)",
       "Bash(pip install:*)",
