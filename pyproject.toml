@@ -19,6 +19,7 @@ dependencies = [
     "redis>=5.2",
     "structlog>=24.4",
     "alembic>=1.19.1",
+    "python-multipart>=0.0.32",
 ]
 
 [project.optional-dependencies]
@@ -133,7 +134,9 @@ layers = [
     "services",
     "schemas",
     "models",
-    "db",
+    # 同层用 | 分隔，契约会额外验证它们**互不 import** —— providers 只认外部格式、
+    # db 只管连接，两者各自独立正是 architecture.md 那张图想表达的。
+    "providers | db",
     "logging",
     "config",
 ]

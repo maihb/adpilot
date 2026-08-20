@@ -32,3 +32,11 @@ class ReferenceNotFoundError(DomainError):
     **与 `NotFoundError` 分开是因为客户端要采取的行动不同**：404 的意思是「换
     个 URL」，422 的意思是「改请求体」。混成一个的话，前端只能靠读文案猜。
     """
+
+
+class InvalidDataError(DomainError):
+    """送进来的外部数据本身不合法，比如一份解析不了的 CSV → 422。
+
+    message 直接来自 `providers`，**必须带得上定位信息**（第几行、哪个字段、
+    期望什么）。导入的人拿着一份几千行的文件，只说「解析失败」等于没说。
+    """

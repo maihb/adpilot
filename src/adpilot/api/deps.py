@@ -13,6 +13,7 @@ from fastapi import Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from adpilot.config import Settings
+from adpilot.db.mongo import MongoDatabase
 from adpilot.db.postgres import session_scope
 from adpilot.resources import Resources
 
@@ -35,6 +36,18 @@ async def get_session(
         yield session
 
 
+def get_mongo(resources: Annotated[Resources, Depends(get_resources)]) -> MongoDatabase:
+    """原始快照所在的 Mongo 库。
+
+    与 `get_session` 不同，这里**没有事务** —— Mongo 侧的写入是 append-only 的
+    单条 insert，没有需要一起提交或一起回滚的东西。所以一次导入请求里，PG 那边
+    回滚了、Mongo 这边的快照仍然留着：这是刻意的取舍，快照多一条不伤害任何人，
+    而丢一条就再也拿不回「当时那个数」了。
+    """
+    return resources.mongo_db
+
+
 ResourcesDep = Annotated[Resources, Depends(get_resources)]
 SettingsDep = Annotated[Settings, Depends(get_settings)]
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
+MongoDep = Annotated[MongoDatabase, Depends(get_mongo)]

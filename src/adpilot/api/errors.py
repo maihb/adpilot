@@ -20,6 +20,7 @@ from adpilot.schemas.errors import ErrorResponse
 from adpilot.services.exceptions import (
     ConflictError,
     DomainError,
+    InvalidDataError,
     NotFoundError,
     ReferenceNotFoundError,
 )
@@ -33,6 +34,7 @@ _STATUS_BY_EXCEPTION: Final[dict[type[DomainError], int]] = {
     NotFoundError: status.HTTP_404_NOT_FOUND,
     ConflictError: status.HTTP_409_CONFLICT,
     ReferenceNotFoundError: status.HTTP_422_UNPROCESSABLE_CONTENT,
+    InvalidDataError: status.HTTP_422_UNPROCESSABLE_CONTENT,
 }
 
 
@@ -67,6 +69,7 @@ def responses(*codes: int) -> dict[int | str, dict[str, Any]]:
     described = {
         status.HTTP_404_NOT_FOUND: "资源不存在",
         status.HTTP_409_CONFLICT: "与已有数据冲突",
+        status.HTTP_413_CONTENT_TOO_LARGE: "上传的文件超过大小上限",
         status.HTTP_422_UNPROCESSABLE_CONTENT: "入参不合法，或引用了不存在的对象",
     }
     return {code: {"model": ErrorResponse, "description": described[code]} for code in codes}

@@ -12,8 +12,9 @@
 
 ## 领域
 
-> **现在是 D3 中段**：客户与账户已经端到端可用（表 + 服务层 + 接口 + 测试），
-> 下一步是数据接入与归一化。下表是
+> **现在是 D3 后段**：客户与账户、数据接入都已端到端可用，原始报表能落成 Mongo
+> 快照。**还差归一化那一跳** —— 快照进去了，`daily_metrics` 还是空的，所以
+> D3–5 的验收标准（「导一份 CSV 进去，接口能查出归一化日指标」）尚未达成。下表是
 > [设计文档第六、七节](../design/2026-08-19-mvp-design.md)定下的范围，落一个
 > 勾一个。**「状态」这一列不许提前打勾** —— 一张说自己有东西但其实没有的表，
 > 比没有这张表更糟。
@@ -26,7 +27,7 @@
 |---|---|---|---|---|
 | [glossary](glossary.md) | — | 术语、指标口径、时区、回填与重述、规则公式 | `rules/`（🚧） | ✅ 口径已定，参数待填 |
 | [客户与账户](clients.md) | `clients` | 客户、广告账户（平台/币种/**时区**）、账户与客户的归属 | `client.py` `ad_account.py`（model / schema / service / api 四层同名） | ✅ D3：建、查、改与分页已落地，无删除 |
-| 数据接入 | — | `ReportProvider` 适配器注册表、文件导入、原始快照落盘 | `providers/`（🚧） | 🚧 D3 |
+| [数据接入](imports.md) | `imports` | `ReportProvider` 适配器注册表、文件导入、原始快照落盘 | `providers/` `services/imports.py` | ✅ D3：CSV 导入与 append-only 落盘已通，Excel 与拉取调度未做 |
 | 归一化 | — | 平台字段 → 统一口径，唯一键 upsert，可重跑 | `services/normalize.py`（🚧） | 🚧 D3–D5：`daily_metrics` 表与唯一键已就位 |
 | 指标查询 | — | 日指标的查询与聚合、环比 | `services/daily_metrics.py`（🚧） | 🚧 D5 |
 | 规则与告警 | — | 余额可撑天数、库存断货、指标异动 | `rules/`（🚧） | 🚧 D6–D8 |

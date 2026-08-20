@@ -13,7 +13,7 @@ from contextlib import asynccontextmanager
 import structlog
 from fastapi import FastAPI
 
-from adpilot.api import ad_account, client, health
+from adpilot.api import ad_account, client, health, imports
 from adpilot.api.errors import install_error_handlers
 from adpilot.config import Settings, get_settings
 from adpilot.logging import configure_logging
@@ -57,6 +57,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(health.router, prefix=settings.api_prefix)
     app.include_router(client.router, prefix=settings.api_prefix)
     app.include_router(ad_account.router, prefix=settings.api_prefix)
+    app.include_router(imports.router, prefix=settings.api_prefix)
     return app
 
 

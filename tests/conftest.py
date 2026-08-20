@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import AsyncIterator, Iterator
+from datetime import UTC, datetime
 
 import pytest
 from fastapi import FastAPI
@@ -21,8 +22,10 @@ from httpx import ASGITransport, AsyncClient
 from pydantic import SecretStr
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from adpilot.api.deps import get_session
+from adpilot.api.deps import get_mongo, get_session
 from adpilot.config import Environment, Settings
+from adpilot.db import mongo as mongo_db
+from adpilot.db.mongo import RAW_REPORTS, MongoDatabase
 from adpilot.db.postgres import create_engine
 from adpilot.main import create_app
 
@@ -116,9 +119,32 @@ async def live_session(live_settings: Settings) -> AsyncIterator[AsyncSession]:
 
 
 @pytest.fixture
+async def live_mongo(live_settings: Settings) -> AsyncIterator[MongoDatabase]:
+    """连真实 Mongo 的库句柄，用例结束把这一轮写进去的快照删掉。
+
+    **没有 PostgreSQL 那种事务隔离可用**：compose 里的 Mongo 是单机、不是副本集，
+    开不了事务。所以退而求其次，按 `fetched_at` 卡时间删 —— 夹具建立之后写进去的
+    才删，不碰任何既有数据。
+
+    这是**测试专用**的删除。`raw_reports` 在业务上 append-only（CLAUDE.md 硬规矩
+    4），生产代码里不存在删除路径，`tests/` 之外出现 delete 就是 bug。
+    """
+    client = mongo_db.create_client(live_settings)
+    started = datetime.now(UTC)
+    try:
+        yield mongo_db.get_database(client, live_settings)
+        await mongo_db.get_database(client, live_settings)[RAW_REPORTS].delete_many(
+            {"fetched_at": {"$gte": started}}
+        )
+    finally:
+        client.close()
+
+
+@pytest.fixture
 async def live_api(
     live_settings: Settings,
     live_session: AsyncSession,
+    live_mongo: MongoDatabase,
 ) -> AsyncIterator[AsyncClient]:
     """打真实数据库、但用例结束整体回滚的 HTTP 客户端。
 
@@ -137,6 +163,7 @@ async def live_api(
     """
     app = create_app(live_settings)
     app.dependency_overrides[get_session] = lambda: live_session
+    app.dependency_overrides[get_mongo] = lambda: live_mongo
     async with AsyncClient(
         transport=ASGITransport(app=app),
         base_url="http://test",

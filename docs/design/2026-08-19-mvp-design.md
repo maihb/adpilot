@@ -117,12 +117,22 @@ Meta 一年能改三次字段叫法，TikTok 同理。**上个月的报表用的
 
 **理由是工程判断不是偷懒**：Meta / TikTok 的开发者应用审核能拖掉一周以上，而作者手上真实客户的广告账户此刻还没开始跑量——**没有真实数据可拉，接了 API 也是空的**。
 
-所以 MVP 走 `FileImportProvider`（后台导出的 CSV/Excel），这正是作者现在手工做的事，替掉它立刻产生价值。API 适配器留好接口，凭据到位当天可插上：
+所以 MVP 走 `CsvImportProvider`（后台导出的 CSV），这正是作者现在手工做的事，替掉它立刻产生价值。API 适配器留好接口，凭据到位当天可插上：
 
 ```python
 class ReportProvider(Protocol):
-    def fetch(self, account: AdAccount, day: date) -> RawReport: ...
+    name: str
+
+    def parse(self, content: bytes) -> ParseResult: ...
 ```
+
+> **签名在落地时改过一次**（2026-08-20，D3）。原稿是 `fetch(account, day)`，那是
+> **拉取型**的形状；而文件导入是**推送型**——日期是从文件内容里读出来的，不是入参，
+> 一份文件也通常横跨多天多对象。硬塞进同一个签名，结果是两边各带一半用不上的参数。
+>
+> 接平台 API 适配器时的做法：在这个 Protocol 上加一个 `fetch` 方法，两种形态各有
+> 各的入口。**要统一的是产物（`RawRows`）而不是入口**——产物一致，归一化、重跑、
+> 审计才是同一套代码。真相源是 `src/adpilot/providers/base.py`。
 
 **这是作者做过的模式**（多模型图像生成的 `ImageGenerator` 适配器注册表），迁移过来是同一套思路：新增供应商只实现接口，调用方零改动。
 
