@@ -27,3 +27,23 @@ class TokenResponse(BaseModel):
 
     token: str
     expires_at: datetime
+
+
+class InviteRedeemRequest(BaseModel):
+    """客户端用邀请码换 token。
+
+    长度上限挡的是「拿一兆的字符串当码来试」；真正的码是 32 个字符
+    （`services/invite.py` 的 `CODE_BYTES`）。
+    """
+
+    code: str = Field(min_length=1, max_length=128)
+
+
+class ClientTokenResponse(TokenResponse):
+    """兑换出来的客户端 token，外加一个客户名。
+
+    带上名字是为了让小程序在**第一屏**就能显示「XX 的投放看板」，而不必再发一次
+    请求去问自己是谁 —— 扫码进来那一下是这条链路上唯一会被用户感知到的等待。
+    """
+
+    client_name: str

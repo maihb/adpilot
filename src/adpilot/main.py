@@ -22,6 +22,7 @@ from adpilot.api import (
     daily_metric,
     health,
     imports,
+    invite,
     task,
 )
 from adpilot.api.deps import require_operator
@@ -83,6 +84,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # 接口要么带 security、要么在一份显式的豁免清单里。
     for router in (
         client.router,
+        invite.router,
         ad_account.router,
         imports.router,
         daily_metric.router,

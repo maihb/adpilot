@@ -1,7 +1,8 @@
 # 认证与授权作用域
 
 **代码**：`auth/token.py`（签发与校验）· `auth/password.py`（运营密码）·
-`api/auth.py`（路由）· `api/deps.py`（两个身份依赖）· `tests/test_auth_*.py`
+`models/invite.py` + `services/invite.py`（邀请码）· `api/auth.py` + `api/invite.py`
+（路由）· `api/deps.py`（两个身份依赖）· `tests/test_auth_*.py` `tests/test_invites_api.py`
 
 **范围出处**：[前端接入与认证方案](../design/2026-08-21-client-auth.md) · 里程碑 D9
 
@@ -19,6 +20,11 @@
 |---|---|---|
 | `login` | POST `/api/auth/login` | 运营登录，**免认证** |
 | `refreshToken` | POST `/api/auth/refresh` | 运营续期，要未过期的运营 token |
+| `redeemInvite` | POST `/api/auth/redeem` | 邀请码换客户端 token，**免认证** |
+| `refreshClientToken` | POST `/api/auth/client/refresh` | 客户端续期，要未过期的客户端 token |
+| `createInvite` | POST `/api/clients/{client_id}/invites` | 生成邀请码，**响应里的明文码只出现这一次** |
+| `listInvites` | GET `/api/clients/{client_id}/invites` | 列出某个客户的码，不含明文 |
+| `revokeInvite` | POST `/api/clients/{client_id}/invites/{invite_id}/revoke` | 作废 |
 
 ## 能读文档就够的部分
 
@@ -33,6 +39,13 @@
 | 运营账号从哪来 | 环境变量（`OPERATOR_USERNAME` + `OPERATOR_PASSWORD_HASH`），**不建用户表**，多人共用一个账号 |
 | 没配 `AUTH_SECRET` 时 | 登录返回 **503**（部署方的问题），不是 401 |
 | 生产环境 | `ENVIRONMENT=prod` 且认证没配齐时**进程直接起不来** |
+| 邀请码有效期 | 默认 30 天，生成时可指定 1–365 天，**没有「永不过期」** |
+| 邀请码可用几次 | 有效期内**不限次数**（老板和运营两个人都要看，还会换手机、清缓存） |
+| 邀请码作废 | 一键失效，但**已经换出去的 token 不受影响**，最多再活 7 天 |
+| 重复作废 | 幂等，不覆盖第一次的 `revoked_at` |
+| 兑换失败 | 码不存在、过期、已作废、客户已停止合作，**四种都回同一个 404** |
+| 停止合作的客户 | 他的码换不出 token，**且他手上已有的 token 立刻失效** |
+| 明文码存不存 | 不存。库里是 SHA-256，要就重新生成一个 |
 
 ## ⛔ 必须读源码的部分
 
@@ -49,6 +62,16 @@
 - **两处哈希故意不一样**：运营密码用 argon2（慢，抵消人类密码的低熵），邀请码
   用 SHA-256（192 位随机串，慢哈希防不住任何本来防得住的攻击）。看到「这里怎么
   没统一」时，先读 `auth/password.py` 的模块 docstring。
+
+## 邀请码：为什么是这个形状
+
+- **它存库，而 token 不存**，区别只有一个：要不要能撤销。邀请码要能作废、要能
+  列出来看「这个客户的码什么时候发的、有没有人用过」—— 这些都是状态。
+- **不做成严格一次性**（主设计文档原稿是「一次性链接」）。一个客户往往老板和
+  运营两个人要看，还会换手机、清缓存、小程序被系统清理 —— 每次都要运营重新
+  生成一个，那是把成本转嫁给唯一不该被打扰的人。
+- **码本身是 `secrets.token_urlsafe(24)`（192 位熵），哈希用 SHA-256**。它不是
+  人类密码，慢哈希在这里防不住任何本来防得住的攻击。
 
 ## 已知残余
 

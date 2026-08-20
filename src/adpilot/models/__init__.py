@@ -17,6 +17,7 @@ from adpilot.models.alert import Alert, AlertKind, AlertStatus
 from adpilot.models.balance import Balance
 from adpilot.models.client import Client
 from adpilot.models.daily_metric import DailyMetric, MetricLevel
+from adpilot.models.invite import Invite
 
 __all__ = [
     "AdAccount",
@@ -26,6 +27,7 @@ __all__ = [
     "Balance",
     "Client",
     "DailyMetric",
+    "Invite",
     "MetricLevel",
     "Platform",
 ]

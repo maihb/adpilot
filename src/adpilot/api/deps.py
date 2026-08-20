@@ -26,6 +26,7 @@ from adpilot.config import Settings
 from adpilot.db.mongo import MongoDatabase
 from adpilot.db.postgres import session_scope
 from adpilot.resources import Resources
+from adpilot.services import client as client_service
 
 
 def get_resources(request: Request) -> Resources:
@@ -141,6 +142,31 @@ def require_operator(
     return context.payload
 
 
+async def require_client_scope(
+    context: Annotated[AuthContext, Depends(get_client_context)],
+    session: SessionDep,
+) -> int:
+    """客户端作用域：token 里那个 `client_id`，**且这个客户仍在合作**。
+
+    `/api/portal/*` 下的每个路由都必须声明它。查询按它过滤这件事不能靠自觉 ——
+    漏一次的后果是把 A 客户的花费给 B 客户看见，而这种漏不会有任何报错。
+    机器保证分两层，这是第一层（`tests/test_auth_guard.py` 遍历 openapi.json 检查
+    每个 portal 路由都要 `ClientBearer`）；第二层是客户端用的 service 函数把
+    `client_id` 做成必填关键字参数，让「查全部客户」在那条路径上根本写不出来。
+
+    ⚠️ **这里多了一次主键查询**，是刻意的：停止合作的客户置 `is_active=False`
+    之后**立刻**看不到数据，不用等他手上那张 token 自己过期。理由与代价见
+    `services/client.py` 的 `is_active`。
+    """
+    client_id = context.payload.client_id
+    if not await client_service.is_active(session, client_id):
+        # 与「token 无效」同一个出口：对客户来说这两件事的处置一样（找运营），
+        # 而分开报会告诉他「这个客户是存在的，只是停用了」。
+        raise InvalidTokenError("客户已停止合作")
+    return client_id
+
+
 OperatorDep = Annotated[TokenPayload, Depends(require_operator)]
 OperatorContextDep = Annotated[AuthContext, Depends(get_operator_context)]
 ClientContextDep = Annotated[AuthContext, Depends(get_client_context)]
+ClientScopeDep = Annotated[int, Depends(require_client_scope)]

@@ -30,10 +30,21 @@ PUBLIC_OPERATIONS = frozenset(
         # 才能回答「你还活着吗」的探针，会把配置错误表现成服务挂掉。
         "get /api/health/live",
         "get /api/health/ready",
-        # 换 token 的入口自己不能要 token。
+        # 换 token 的两个入口自己不能要 token。
         "post /api/auth/login",
+        "post /api/auth/redeem",
     }
 )
+
+#: 要**客户身份**的接口。`/api/portal/` 下的全部路由自动算在内（按前缀判），
+#: 这份清单是那个前缀之外的例外 —— 目前只有客户端续期，它属于认证链路，所以
+#: 挂在 `/api/auth/` 下面。
+PORTAL_PREFIX = "/api/portal/"
+CLIENT_OPERATIONS = frozenset({"post /api/auth/client/refresh"})
+
+
+def _wants_client_scope(name: str) -> bool:
+    return name in CLIENT_OPERATIONS or PORTAL_PREFIX in name
 
 
 def _operations(client: TestClient) -> dict[str, dict[str, Any]]:
@@ -68,12 +79,32 @@ def test_internal_operations_ask_for_the_operator_scheme(offline_client: TestCli
     schemes = {
         name: [key for requirement in operation["security"] for key in requirement]
         for name, operation in _operations(offline_client).items()
-        if name not in PUBLIC_OPERATIONS
+        if name not in PUBLIC_OPERATIONS and not _wants_client_scope(name)
     }
 
     assert schemes, "一条内部接口都没找到，这条测试自己失效了"
     for name, required in schemes.items():
         assert required == ["OperatorBearer"], f"{name} 要的不是运营身份：{required}"
+
+
+def test_client_facing_operations_ask_for_the_client_scheme(offline_client: TestClient) -> None:
+    """**作用域门禁的第一层。**
+
+    客户端路由必须要 `ClientBearer` —— 挂成运营身份的话，那个接口就成了「任何
+    运营 token 都能调、而且没有 client_id 可以过滤」的形状。
+
+    这条同时管住 `/api/portal/` 下的每一个新路由：加了却忘了声明作用域依赖，
+    这里当场红。加一条客户端接口而不放在那个前缀下，也要来这里登记一行。
+    """
+    schemes = {
+        name: [key for requirement in operation["security"] for key in requirement]
+        for name, operation in _operations(offline_client).items()
+        if _wants_client_scope(name)
+    }
+
+    assert schemes, "一条客户端接口都没找到，这条测试自己失效了"
+    for name, required in schemes.items():
+        assert required == ["ClientBearer"], f"{name} 要的不是客户身份：{required}"
 
 
 def test_anonymous_requests_are_rejected_with_a_challenge(anonymous_client: TestClient) -> None:

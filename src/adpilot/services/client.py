@@ -33,6 +33,19 @@ async def get(session: AsyncSession, client_id: int) -> Client:
     return client
 
 
+async def is_active(session: AsyncSession, client_id: int) -> bool:
+    """这个客户还在合作吗。不存在也算 `False`。
+
+    **客户端认证每次请求都要问一次**（`api/deps.py` 的 `require_client_scope`）。
+    多这一次主键查询，换来的是一个真正的「踢人」手段：停止合作的客户置
+    `is_active=False` 之后**立刻**看不到数据，不用等他手上那张 token 自己过期。
+
+    这不推翻「自包含 token 撤销不了」——单张 token 仍然撤不掉，这里是在它旁边
+    补了个粗粒度开关。唯一的替代品是改 `AUTH_SECRET`，那会让所有人一起失效。
+    """
+    return bool(await session.scalar(select(Client.is_active).where(Client.id == client_id)))
+
+
 async def list_page(
     session: AsyncSession,
     *,
