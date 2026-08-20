@@ -30,6 +30,7 @@ from collections.abc import Sequence
 from typing import Final
 
 from celery import Celery
+from celery.schedules import crontab
 from kombu import Exchange, Queue
 
 from adpilot.config import Settings
@@ -38,6 +39,16 @@ from adpilot.config import Settings
 # 这个字符串是生产者与消费者之间唯一的契约 —— 改了它，队列里在途的老消息就再也
 # 没人认领。名字定在这里而不是任务模块里，正是为了让生产者够得着它。
 TASK_NORMALIZE_ACCOUNT: Final = "adpilot.normalize_account"
+TASK_SWEEP_ALERTS: Final = "adpilot.sweep_alerts"
+
+# 巡检的排期。**每小时一次，不是每天一次。**
+#
+# 余额可撑天数低于 1 天的账户是存在的（大促期间日耗翻几倍），一天扫一次可能整个
+# 错过它归零的那个窗口 —— 而错过的代价是学习期重置，远大于多跑 23 次巡检。
+#
+# 敢这么密是因为两件事：巡检本身很轻（几个账户、两条 SQL），以及告警是**状态机**
+# —— 同一件事只有一条 open，只在新开时推送，所以密集巡检不会变成密集打扰。
+SWEEP_SCHEDULE_MINUTE: Final = 0
 
 MAIN_QUEUE: Final = "adpilot"
 DEAD_LETTER_QUEUE: Final = "adpilot.dead"
@@ -130,6 +141,18 @@ def create_celery_app(settings: Settings, *, include: Sequence[str] = ()) -> Cel
         # `--without-mingle` / `--without-gossip`，而它们同样会去碰 pidbox。所以
         # **启动命令上那两个参数一个都不能少**，`tests/test_tasks.py` 里有门禁盯着。
         worker_enable_remote_control=False,
+        # 定时排期。**要有一个 beat 进程在跑它才会发生**（`make beat`，或 compose
+        # 里的 beat 服务）—— 忘了起 beat 的症状是「告警一条都不来」，而那看起来
+        # 跟「一切正常」一模一样。
+        beat_schedule={
+            "sweep-alerts-hourly": {
+                "task": TASK_SWEEP_ALERTS,
+                "schedule": crontab(minute=SWEEP_SCHEDULE_MINUTE),
+                # 排期投出来的消息也要落在业务队列上，否则它会去默认的 celery
+                # 队列，而 worker 只消费 adpilot —— 消息进去了，没人取。
+                "options": {"queue": MAIN_QUEUE},
+            },
+        },
     )
     return app
 

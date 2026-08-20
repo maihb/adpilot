@@ -1,20 +1,17 @@
-"""余额快照与余额告警的路由。
+"""余额快照的路由：录进来、查回去、算这个账户还能撑几天。
 
-三个接口挂同一个 tag：录余额存在的**唯一目的**就是算告警（glossary 里 `balance`
-的定义就是「余额告警的依据」），拆成两个领域会让人以为它们能各用各的。
+**跨账户的余额清单不在这里**，它在 `api/alert.py` —— 所有 `/alerts*` 归一处，
+不然 OpenAPI 分组时同一个路径前缀会散在两个 tag 下。
 """
 
 from __future__ import annotations
 
-from typing import Annotated
-
-from fastapi import APIRouter, Query, status
+from fastapi import APIRouter, status
 
 from adpilot.api.deps import SessionDep
 from adpilot.api.errors import responses
 from adpilot.api.pagination import DEFAULT_PAGE_SIZE, PageParam, PageSizeParam
 from adpilot.schemas.balance import (
-    BalanceAlertListResponse,
     BalanceCreateRequest,
     BalanceItem,
     BalanceListResponse,
@@ -98,41 +95,18 @@ async def get_balance_runway(account_id: int, session: SessionDep) -> BalanceRun
     `is_alerting` 一定是 false。口径见 `docs/business/balances.md`。
     """
     alert = await balance_service.alert_for_account(session, account_id)
-    return _to_response(alert) if alert is not None else None
+    return to_runway_response(alert) if alert is not None else None
 
 
-@router.get(
-    "/alerts/balances",
-    response_model=BalanceAlertListResponse,
-    operation_id="listBalanceAlerts",
-)
-async def list_balance_alerts(
-    session: SessionDep,
-    only_alerting: Annotated[
-        bool,
-        Query(description="只看已触发告警的；关掉就是所有录过余额的在投账户"),
-    ] = True,
-) -> BalanceAlertListResponse:
-    """扫一遍所有**在投**账户的余额，最紧急的排前面。
-
-    停投的账户（`is_active=false`）不看：它们混在列表里只会让人学会忽略这个列表。
-    从没录过余额的账户也不出现 —— 那是「不知道」，不是「没事」。
-
-    **没有分页**：这是一张给人当天处理用的清单，长到需要翻页就说明该先去补余额
-    数据，而不是往后翻。
-    """
-    found = await balance_service.alerts(session, only_alerting=only_alerting)
-    return BalanceAlertListResponse(
-        items=[_to_response(alert) for alert in found],
-        total=len(found),
-    )
-
-
-def _to_response(alert: balance_service.BalanceAlert) -> BalanceRunwayResponse:
+def to_runway_response(alert: balance_service.BalanceAlert) -> BalanceRunwayResponse:
     """把服务层的结果摊平成出参。
 
-    摊平而不是嵌套一层 `runway`：这个接口的调用方要的是一行能直接显示的东西，
-    多一层嵌套只会让前端多写一个 `.runway.`。
+    摊平而不是嵌套一层 `runway`：调用方要的是一行能直接显示的东西，多一层嵌套只会
+    让前端多写一个 `.runway.`。
+
+    放在这个模块而不是 `schemas/`，是因为它认识 `services` 里的类型，而分层契约里
+    `schemas` 在 `services` **之下** —— 那边够不着。`api/alert.py` 的余额清单也用
+    它，两处共一份，免得摊平规则改一处漏一处。
     """
     return BalanceRunwayResponse(
         account_id=alert.account_id,

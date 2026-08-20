@@ -101,6 +101,22 @@ class Settings(BaseSettings):
     # 已经在用的 RabbitMQ 时必须换一个，否则两个系统的队列名会在同一个空间里撞。
     rabbitmq_vhost: str = "/"
 
+    # --- 告警通知：配了就推，没配就只记日志 ---
+    #
+    # 🔴 **这是凭据，不是普通 URL。** 企业微信 / 钉钉 / 飞书的 webhook 地址里直接
+    # 带着 key，泄一次等于把发消息的权限交出去 —— 所以是 SecretStr，且任何日志、
+    # 任何异常消息里都不许出现它。
+    #
+    # 空着是**正常状态**（和 `redis_password` 同理，不是「凭据缺了个默认值」）：
+    # 开源使用者未必有 webhook，而一个「没配通知就起不来」的系统不符合「陌生人
+    # clone 下来最容易跑起来」这条判断标准。
+    alert_webhook_url: SecretStr = Field(default=SecretStr(""))
+
+    @property
+    def alerts_are_pushed(self) -> bool:
+        """配了 webhook 没有。判断收口在这里，调用方不去比对空字符串。"""
+        return bool(self.alert_webhook_url.get_secret_value())
+
     @property
     def postgres_dsn(self) -> str:
         """异步 SQLAlchemy DSN。"""

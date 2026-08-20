@@ -21,6 +21,7 @@ dependencies = [
     "alembic>=1.19.1",
     "python-multipart>=0.0.32",
     "celery>=5.4",
+    "httpx>=0.28",
 ]
 
 [project.optional-dependencies]
@@ -143,9 +144,11 @@ layers = [
     "services",
     "schemas",
     "models",
-    # providers 只认外部格式、db 只管连接（含 RabbitMQ 的接线），两者各自独立正是
-    # architecture.md 那张图想表达的。
-    "providers | db",
+    # providers 只认外部格式、db 只管连接（含 RabbitMQ 的接线）、notifiers 只管把
+    # 消息送出去，三者各自独立正是 architecture.md 那张图想表达的。providers 是
+    # 入站、notifiers 是出站，摆在同一层是因为它们都只跟外部系统打交道、都不认识
+    # 业务。
+    "providers | db | notifiers",
     # rules 压在这么低的位置是**故意的**：它够不着 models、schemas、db，所以想在
     # 规则里写一句 select(...) 会被这份契约当场拦下。architecture.md 把 rules 和
     # services 画在同一行说的是「都是业务逻辑」，依赖方向上则是 services 调 rules、

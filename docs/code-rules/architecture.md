@@ -3,9 +3,9 @@
 技术选型的来龙去脉在[设计文档第四节](../design/2026-08-19-mvp-design.md)，这里只讲
 **代码怎么摆、依赖往哪个方向走**。
 
-> **进度**：D1–D7 完成 —— 骨架、四个客户端、`models/` + Alembic 迁移、`schemas/`、
-> `services/`、`providers/`、`tasks/`（导入完自动排归一化，worker 在另一个进程里跑）
-> 和 `rules/`（余额可撑天数与告警）都已落地。下面仍标 🚧 的目录还不存在 —— 先把
+> **进度**：D1–D8 完成 —— 骨架、四个客户端、`models/` + Alembic 迁移、`schemas/`、
+> `services/`、`providers/`、`tasks/`（含每小时的告警巡检）、`rules/`（余额可撑
+> 天数、指标周同比异动）和 `notifiers/` 都已落地。只剩 `llm/` 还标着 🚧 —— 先把
 > 位置定下来，是为了三个人（或三个 agent）各写各的时候不会摆出三套结构。
 
 ---
@@ -39,8 +39,12 @@ src/adpilot/
   tasks/            Celery 任务：任务体只做编排，逻辑仍在 services/
     app.py          worker 入口（`celery -A adpilot.tasks.app`）+ 重试策略基类
     runtime.py      同步的 Celery ↔ async 业务代码；**两个致命坑写在它的 docstring 里**
+    alerts.py       定时巡检；排期在 db/broker.py 的 beat_schedule，要单起一个 beat 进程
   rules/            规则引擎：纯函数，数据进、判定出。**够不着数据库，契约保证**
-    balance.py      余额可撑天数与告警阈值（断货、指标异动还没做）
+    balance.py      余额可撑天数与告警阈值
+    anomaly.py      指标周同比异动（库存断货还没做）
+  notifiers/        出站通知：只管送出去，不决定要不要送
+    webhook.py      通用 webhook；🔴 URL 本身是凭据
   llm/          🚧  LLM 适配器与提示词，输出必须过 Pydantic 校验
 tests/
   conftest.py       夹具：offline_*（不连外部服务）与 live_*（连真实服务）
@@ -69,7 +73,8 @@ config / logging          ← 谁都能 import，它们谁都不 import
       ↑
 rules                     ← 纯函数：数据进、判定出。**够不着上面任何一层**
       ↑
-db / providers / llm      ← 基础设施：连接、外部系统适配
+db / providers            ← 基础设施：连接、外部系统适配
+notifiers / llm           ← （同一层：入站 providers、出站 notifiers）
       ↑
 models → schemas          ← 数据形状
       ↑
@@ -188,7 +193,9 @@ result backend 由接口去查（`GET /api/tasks/{id}`）。worker **不回调**
 | 一段业务逻辑 | `services/<entity>.py` | 纯 async 函数，第一个参数是 session |
 | 一条判定规则（阈值、告警） | `rules/<rule>.py` | `rules/balance.py`；纯函数：数据进、判定出，不查库。查库那半边写在 `services/<rule>.py` |
 | 一个数据源 | `providers/<platform>.py` | 实现 `ReportProvider` 协议，注册进注册表 |
-| 一个后台任务 | `tasks/<domain>.py` | `tasks/normalize.py`；任务体只做编排，逻辑仍在 `services/`。**别忘了在 `tasks/app.py` 的 `TASK_MODULES` 里加一行**，否则 worker 认不出这个任务 |
+| 一个后台任务 | `tasks/<domain>.py` | `tasks/normalize.py`；任务体只做编排，逻辑仍在 `services/`。**别忘了在 `tasks/app.py` 的 `TASK_MODULES` 里加一行**，否则 worker 认不出这个任务（有门禁盯着） |
+| 一个定时任务 | 同上 + `db/broker.py` 的 `beat_schedule` | 排期要显式指定 `queue`，否则消息进默认队列没人取。跑起来还要有一个 beat 进程 |
+| 一个通知通道 | `notifiers/<channel>.py` | `notifiers/webhook.py`；只管送出去，失败返回 `False` 不抛 |
 
 **判定规则一句话：带 HTTP 语义的进 `api/`，带外部系统的进 `db/`/`providers/`，
 其余都是 `services/` 或 `rules/`。**

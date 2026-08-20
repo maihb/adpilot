@@ -5,53 +5,63 @@
 
 name: adpilot
 
+# 三个应用进程（api / worker / beat）用**同一个镜像、同一份环境**，只是入口进程
+# 不同。抽成 YAML 锚点而不是抄三遍：加一个配置项就要动三处的话，漏掉的那处不会
+# 报错，只会让某个进程读到默认值、连到一个你没想到的地方去。
+x-app-env: &app-env
+  # 主机名和端口在这里**硬写**：容器之间走服务名 + 容器内的默认端口，跟 .env
+  # 里那几个 *_PORT 无关 —— 那些是宿主机侧的映射（也是本机直接跑时用的）。
+  # 凭据则一律从 .env 取，缺了就让 compose 当场失败，绝不给默认值。
+  ENVIRONMENT: ${ENVIRONMENT:-dev}
+  DEBUG: ${DEBUG:-true}
+  POSTGRES_HOST: postgres
+  POSTGRES_PORT: 5432
+  POSTGRES_DB: ${POSTGRES_DB:?请在 .env 里设置 POSTGRES_DB}
+  POSTGRES_USER: ${POSTGRES_USER:?请在 .env 里设置 POSTGRES_USER}
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?请在 .env 里设置 POSTGRES_PASSWORD}
+  MONGO_HOST: mongo
+  MONGO_PORT: 27017
+  MONGO_USER: ${MONGO_USER:?请在 .env 里设置 MONGO_USER}
+  MONGO_PASSWORD: ${MONGO_PASSWORD:?请在 .env 里设置 MONGO_PASSWORD}
+  MONGO_DB: ${MONGO_DB:-adpilot_raw}
+  REDIS_HOST: redis
+  REDIS_PORT: 6379
+  RABBITMQ_HOST: rabbitmq
+  RABBITMQ_PORT: 5672
+  RABBITMQ_USER: ${RABBITMQ_USER:?请在 .env 里设置 RABBITMQ_USER}
+  RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:?请在 .env 里设置 RABBITMQ_PASSWORD}
+  RABBITMQ_VHOST: ${RABBITMQ_VHOST:-/}
+  # 告警推送。**空着是正常状态**：告警照样落库、接口照样查得到，只是不主动推。
+  # 这个 URL 里带着 key，等于凭据 —— 和密码一样只从 .env 取。
+  ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL:-}
+
+x-backends: &backends
+  postgres:
+    condition: service_healthy
+  mongo:
+    condition: service_healthy
+  redis:
+    condition: service_healthy
+  rabbitmq:
+    condition: service_healthy
+
+x-app-build: &app-build
+  context: .
+  target: runtime
+
 services:
   api:
-    build:
-      context: .
-      target: runtime
-    depends_on:
-      postgres:
-        condition: service_healthy
-      mongo:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
-    environment:
-      # 主机名和端口在这里**硬写**：容器之间走服务名 + 容器内的默认端口，跟 .env
-      # 里那几个 *_PORT 无关 —— 那些是宿主机侧的映射（也是本机直接跑时用的）。
-      # 凭据则一律从 .env 取，缺了就让 compose 当场失败，绝不给默认值。
-      ENVIRONMENT: ${ENVIRONMENT:-dev}
-      DEBUG: ${DEBUG:-true}
-      POSTGRES_HOST: postgres
-      POSTGRES_PORT: 5432
-      POSTGRES_DB: ${POSTGRES_DB:?请在 .env 里设置 POSTGRES_DB}
-      POSTGRES_USER: ${POSTGRES_USER:?请在 .env 里设置 POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?请在 .env 里设置 POSTGRES_PASSWORD}
-      MONGO_HOST: mongo
-      MONGO_PORT: 27017
-      MONGO_USER: ${MONGO_USER:?请在 .env 里设置 MONGO_USER}
-      MONGO_PASSWORD: ${MONGO_PASSWORD:?请在 .env 里设置 MONGO_PASSWORD}
-      MONGO_DB: ${MONGO_DB:-adpilot_raw}
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
-      RABBITMQ_HOST: rabbitmq
-      RABBITMQ_PORT: 5672
-      RABBITMQ_USER: ${RABBITMQ_USER:?请在 .env 里设置 RABBITMQ_USER}
-      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:?请在 .env 里设置 RABBITMQ_PASSWORD}
-      RABBITMQ_VHOST: ${RABBITMQ_VHOST:-/}
+    build: *app-build
+    depends_on: *backends
+    environment: *app-env
     ports:
       - "${API_PORT:-8000}:8000"
     restart: unless-stopped
 
   worker:
-    # 跟 api 同一个镜像、同一份环境，只是换个进程跑 —— 两条链路共用 services/，
-    # 镜像分家只会让「代码更新了但 worker 还是旧的」变成一类新故障。
-    build:
-      context: .
-      target: runtime
+    # 跟 api 同一个镜像，只是换个进程跑 —— 两条链路共用 services/，镜像分家只会让
+    # 「代码更新了但 worker 还是旧的」变成一类新故障。
+    build: *app-build
     # 三个参数都不能省（与 Makefile 的 worker target 保持一致，有测试盯着）：
     #   -Q adpilot                       不指定就去消费默认的 celery 队列，而任务
     #                                    全投在 adpilot 上，于是一条都不处理；
@@ -68,39 +78,33 @@ services:
       - adpilot
       - --without-mingle
       - --without-gossip
-    depends_on:
-      postgres:
-        condition: service_healthy
-      mongo:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
-    environment:
-      ENVIRONMENT: ${ENVIRONMENT:-dev}
-      DEBUG: ${DEBUG:-true}
-      POSTGRES_HOST: postgres
-      POSTGRES_PORT: 5432
-      POSTGRES_DB: ${POSTGRES_DB:?请在 .env 里设置 POSTGRES_DB}
-      POSTGRES_USER: ${POSTGRES_USER:?请在 .env 里设置 POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?请在 .env 里设置 POSTGRES_PASSWORD}
-      MONGO_HOST: mongo
-      MONGO_PORT: 27017
-      MONGO_USER: ${MONGO_USER:?请在 .env 里设置 MONGO_USER}
-      MONGO_PASSWORD: ${MONGO_PASSWORD:?请在 .env 里设置 MONGO_PASSWORD}
-      MONGO_DB: ${MONGO_DB:-adpilot_raw}
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
-      RABBITMQ_HOST: rabbitmq
-      RABBITMQ_PORT: 5672
-      RABBITMQ_USER: ${RABBITMQ_USER:?请在 .env 里设置 RABBITMQ_USER}
-      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:?请在 .env 里设置 RABBITMQ_PASSWORD}
-      RABBITMQ_VHOST: ${RABBITMQ_VHOST:-/}
+    depends_on: *backends
+    environment: *app-env
     # **刻意没有 healthcheck。** worker 不监听端口，唯一像样的探法是
     # `celery inspect ping`，而远程控制在 RabbitMQ 4 上根本用不了（理由见
     # db/broker.py）。剩下的招数只能探到「进程还在」—— 那件事 `restart` 已经管了，
     # 写一个只会给出「健康」这个假信号。要知道 worker 在干什么，看它的日志。
+    restart: unless-stopped
+
+  beat:
+    # 排期进程：只负责按点把任务投进队列，真正干活的是 worker。**两个都要起** ——
+    # 只起 worker 的症状是「告警一条都不来」，而那看起来跟「一切正常」一模一样。
+    #
+    # 🔴 **只能有一个 beat 实例。** 起两个就是每个排期被投两遍。worker 可以横向
+    # 扩，beat 不行 —— 这也是它没有和 worker 合成一个进程（`worker -B`）的理由：
+    # 合了之后 worker 就再也扩不动了。
+    build: *app-build
+    command:
+      - celery
+      - -A
+      - adpilot.tasks.app
+      - beat
+      - --loglevel=info
+      # 排期状态落到容器内的临时目录。它记的是「上次什么时候投的」，是运行时状态
+      # 不是数据 —— 丢了最多重复投一次，而巡检本来就是幂等的，不值得为它挂一个卷。
+      - --schedule=/tmp/celerybeat-schedule
+    depends_on: *backends
+    environment: *app-env
     restart: unless-stopped
 
   postgres:

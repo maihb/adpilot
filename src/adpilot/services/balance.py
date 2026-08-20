@@ -20,26 +20,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from adpilot.models.ad_account import AdAccount
 from adpilot.models.balance import Balance
-from adpilot.models.daily_metric import DailyMetric, MetricLevel
 from adpilot.rules import balance as balance_rules
 from adpilot.services import ad_account as ad_account_service
+from adpilot.services import daily_metric as daily_metric_service
 from adpilot.services.exceptions import ConflictError
 
 log = structlog.get_logger(__name__)
-
-# 🔴 **算账户日均消耗时只用其中一个层级的行，不是全部加起来。**
-#
-# 同一天可能既有账户级又有广告系列级的数据（导了两份不同层级的报表），全加起来
-# 就是双倍花费，于是日均翻倍、可撑天数腰斩 —— 一条凭空冒出来的告警。
-#
-# 挑法是「取有数据的最高层级」：账户级最准（平台自己汇总的，含未归到系列的花费），
-# 没有就退到系列级，以此类推。顺序即优先级。
-_LEVEL_PRIORITY: tuple[MetricLevel, ...] = (
-    MetricLevel.ACCOUNT,
-    MetricLevel.CAMPAIGN,
-    MetricLevel.ADGROUP,
-    MetricLevel.AD,
-)
 
 
 @dataclass(frozen=True, slots=True)
@@ -154,7 +140,14 @@ async def _alert(session: AsyncSession, account: AdAccount) -> BalanceAlert | No
         return None
 
     start, end = _lookback_window(account)
-    total_spend, days_with_data = await _spend_in_window(session, account.id, start, end)
+    # 汇总规则（只取一个层级）在 daily_metric 那边 —— 它属于 daily_metrics，
+    # 而且异动那条规则要的基线也走同一份逻辑。
+    totals = await daily_metric_service.window_totals(
+        session,
+        account_id=account.id,
+        start=start,
+        end=end,
+    )
 
     return BalanceAlert(
         account_id=account.id,
@@ -162,12 +155,12 @@ async def _alert(session: AsyncSession, account: AdAccount) -> BalanceAlert | No
         currency=latest.currency,
         runway=balance_rules.runway(
             latest.available,
-            balance_rules.average_daily_spend(total_spend, days_with_data),
+            balance_rules.average_daily_spend(totals.spend, totals.days_with_data),
         ),
         captured_at=latest.captured_at,
         lookback_from=start,
         lookback_to=end,
-        days_with_data=days_with_data,
+        days_with_data=totals.days_with_data,
     )
 
 
@@ -201,35 +194,3 @@ def _lookback_window(account: AdAccount) -> tuple[date, date]:
     today = datetime.now(ZoneInfo(account.timezone)).date()
     end = today - timedelta(days=1)
     return end - timedelta(days=balance_rules.LOOKBACK_DAYS - 1), end
-
-
-async def _spend_in_window(
-    session: AsyncSession,
-    account_id: int,
-    start: date,
-    end: date,
-) -> tuple[Decimal, int]:
-    """返回 (窗口内总花费, 有数据的天数)，只取一个层级的行 —— 理由见 `_LEVEL_PRIORITY`。
-
-    一次查询把每个层级的汇总都取回来，再在 Python 里按优先级挑。发四条查询轮流
-    试更直白，但那是四个 round trip 换一个只有四行的结果集。
-    """
-    rows = await session.execute(
-        select(
-            DailyMetric.level,
-            func.coalesce(func.sum(DailyMetric.spend), 0),
-            func.count(func.distinct(DailyMetric.stat_date)),
-        )
-        .where(
-            DailyMetric.account_id == account_id,
-            DailyMetric.stat_date.between(start, end),
-        )
-        .group_by(DailyMetric.level)
-    )
-    by_level = {level: (spend, days) for level, spend, days in rows}
-
-    for level in _LEVEL_PRIORITY:
-        summary = by_level.get(level)
-        if summary is not None and summary[1] > 0:
-            return Decimal(summary[0]), int(summary[1])
-    return Decimal(0), 0

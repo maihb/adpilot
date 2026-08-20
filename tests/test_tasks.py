@@ -33,6 +33,7 @@ from adpilot.db.broker import (
     DEAD_LETTER_QUEUE,
     MAIN_QUEUE,
     TASK_NORMALIZE_ACCOUNT,
+    TASK_SWEEP_ALERTS,
 )
 from adpilot.services import task as task_service
 from adpilot.services.exceptions import InvalidDataError
@@ -140,9 +141,47 @@ def test_worker_command_carries_the_flags_that_config_cannot(path: str) -> None:
     assert MAIN_QUEUE in command
 
 
-def test_the_normalize_task_is_registered_under_the_shared_name() -> None:
-    """任务名是生产者和消费者之间唯一的契约：改了它，在途的老消息就没人认领。"""
+@pytest.mark.parametrize("path", ["Makefile", "docker-compose.yml"])
+def test_beat_has_a_way_to_be_started(path: str) -> None:
+    """🔴 排期任务要有一个 beat 进程在跑才会发生。
+
+    只起 worker 的症状是「告警一条都不来」—— 而那和「一切正常、最近没什么问题」
+    长得一模一样，没有任何报错提示你少起了一个进程。所以「有没有 beat 的启动方式」
+    这件事得有机器盯着：删掉那个 target / 那个服务，这条会红。
+    """
+    content = (REPO_ROOT / path).read_text(encoding="utf-8")
+
+    assert "beat" in content
+
+
+def test_the_sweep_is_scheduled() -> None:
+    """排期本身也钉一条：巡检任务必须真的在 `beat_schedule` 里，且投到业务队列。
+
+    投错队列的话消息会进默认的 `celery` 队列，而 worker 只消费 `adpilot` ——
+    消息进去了，没人取，同样是「一条告警都不来」。
+    """
+    schedule = celery_app.conf.beat_schedule
+    entries = [entry for entry in schedule.values() if entry["task"] == TASK_SWEEP_ALERTS]
+
+    assert len(entries) == 1
+    assert entries[0]["options"]["queue"] == MAIN_QUEUE
+
+
+def test_every_task_name_is_registered_by_the_modules_the_worker_loads() -> None:
+    """🔴 worker 只 import `TASK_MODULES` 里列的那几个模块。
+
+    漏一行的症状很安静：任务代码本身完全正常、测试也能直接调它，只有队列里那条
+    消息会被 worker 以「Received unregistered task」拒掉 —— 而那发生在另一个进程
+    的日志里。
+
+    所以这里**按 worker 的方式加载**（`import_default_modules`），再核对每个任务名
+    常量都真的注册上了。直接 `import adpilot.tasks.alerts` 来测就没有意义了：那验的
+    是「这个模块能 import」，不是「worker 会 import 它」。
+    """
+    celery_app.loader.import_default_modules()
+
     assert TASK_NORMALIZE_ACCOUNT in celery_app.tasks
+    assert TASK_SWEEP_ALERTS in celery_app.tasks
     assert normalize_task.normalize_account.name == TASK_NORMALIZE_ACCOUNT
 
 

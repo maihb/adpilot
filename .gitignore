@@ -54,3 +54,9 @@ client/dist/
 # Claude Code：项目级配置与钩子进仓库（它们是这个仓库护栏的一部分），
 # 本机私有覆盖不进 —— settings.local.json 里常有绝对路径和个人偏好
 .claude/settings.local.json
+
+# Celery beat 的排期状态文件。它记着「上次是什么时候投的」，是本机运行时状态，
+# 不是配置。Makefile 里的 beat target 已经把它落到 /tmp，这几条是给「直接跑
+# celery beat 没带 --schedule」的情况兜底。
+celerybeat-schedule*
+celerybeat.pid

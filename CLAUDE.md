@@ -26,6 +26,7 @@
 | **加一个接口**（含可照抄的四步与踩坑速查） | [`docs/code-rules/api.md`](docs/code-rules/api.md) |
 | 分支 / 提交信息 / **推送前自检** / 需明确指令的操作 | [`docs/code-rules/git-workflow.md`](docs/code-rules/git-workflow.md) |
 | **加一个后台任务**（重试与死信怎么分流、worker 里的两个致命坑） | [`docs/business/tasks.md`](docs/business/tasks.md) |
+| **加一条规则或告警**（状态机怎么去重、通知怎么不重复打扰） | [`docs/business/alerts.md`](docs/business/alerts.md) |
 | **指标口径、时区、数据回填、告警公式** | [`docs/business/glossary.md`](docs/business/glossary.md) |
 | 某个业务领域现在做到哪、规则是什么 | [`docs/business/BUSINESS.md`](docs/business/BUSINESS.md) |
 | 为什么同时用 PostgreSQL 和 MongoDB | `src/adpilot/db/mongo.py` 模块 docstring |
@@ -74,7 +75,8 @@
 | 依赖只经 uv 装 | 守卫拦下 `pip install`，并给出 `uv add` 的写法 |
 | 命令只在项目环境里跑 | 守卫拦下裸 `pytest` / `mypy` / `ruff` / `uvicorn`，提示走 `uv run` |
 | **make 只放已授权的 target** | `settings.json` 逐条精确列出；`Bash(make:*)` 刻意不加 —— target 里能写任意命令，通配一条就等于给守卫开后门。新 target 默认不授权 |
-| **celery 只放 worker 子命令** | `settings.json` 里是 `uv run celery -A adpilot.tasks.app worker:*`，不是 `uv run celery:*` —— 同一个 CLI 底下还有 `purge`（清空队列）和 `control`（远程指挥 worker） |
+| **celery 只放 worker / beat 子命令** | `settings.json` 里逐条列出，不是 `uv run celery:*` —— 同一个 CLI 底下还有 `purge`（清空队列）和 `control`（远程指挥 worker） |
+| **worker / beat 的启动参数不许被删** | `tests/test_tasks.py` 同时盯着 Makefile 和 compose：`--without-mingle` / `--without-gossip`（少了 RabbitMQ 4 上起不来）、`-Q adpilot`（少了一条消息都不处理）、以及「有没有 beat 的启动方式」 |
 | **迁移不悄悄删数据** | `tests/test_migration_safety.py`：`upgrade()` 里出现删表/删列，就必须在文件里写一行 `# DESTRUCTIVE-OK: <理由>`。只扫 `upgrade()` —— `downgrade()` 里的 drop 是回滚，每个建表迁移都有 |
 | **改了 model 别忘了生成迁移** | `alembic check` 跑在 CI 的集成 job 里（要连真实库） |
 | **分层依赖不许倒流** | `lint-imports`（import-linter）跑在 CI 里，契约就是 [`architecture.md`](docs/code-rules/architecture.md#分层与依赖方向) 那张图，配置在 `pyproject.toml`。`exhaustive` 开着 —— 新增顶层模块必须先在分层图里占个位置，不能先建了再说 |
@@ -124,6 +126,11 @@ uv run uvicorn adpilot.main:app --reload --reload-dir src   # 只盯 src，改�
 # 队列（于是 worker 疯狂重连后死掉）。
 uv run celery -A adpilot.tasks.app worker --loglevel=info -Q adpilot \
     --without-mingle --without-gossip
+
+# 定时排期。**worker 和 beat 两个都要起** —— 只起 worker 的症状是「告警一条都不来」，
+# 而那看起来跟「一切正常」一模一样。只能有一个 beat 实例，起两个就是每个排期投两遍。
+uv run celery -A adpilot.tasks.app beat --loglevel=info \
+    --schedule=/tmp/adpilot-celerybeat-schedule
 
 uv run ruff check . && uv run ruff format --check .
 uv run mypy src tests

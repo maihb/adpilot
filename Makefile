@@ -26,7 +26,7 @@ COMPOSE ?= docker compose
 
 .DEFAULT_GOAL := help
 
-.PHONY: help bootstrap env setup dev worker lint fmt types imports test test-int check migrate revision up down logs ps
+.PHONY: help bootstrap env setup dev worker beat lint fmt types imports test test-int check migrate revision up down logs ps
 
 help: ## 显示这份清单
 	@awk 'BEGIN {FS = ":.*##"} \
@@ -43,6 +43,7 @@ bootstrap: env setup ## 生成 .env + 装依赖（新电脑就跑这一条）
 	@echo "  2. make up      起 PostgreSQL / MongoDB / Redis / RabbitMQ"
 	@echo "  3. make dev     起热重载的接口服务"
 	@echo "  4. make worker  另开一个终端，起 Celery worker"
+	@echo "  5. make beat    再开一个，起定时排期（告警巡检靠它）"
 
 env: ## 从 .env.example 生成 .env（已存在就不动它）
 	@if [ -f .env ]; then \
@@ -75,6 +76,16 @@ dev: ## 起接口服务，热重载（依赖得先 make up）
 worker: ## 起 Celery worker，消费 adpilot 队列（依赖得先 make up）
 	$(UV) run celery -A adpilot.tasks.app worker --loglevel=info -Q adpilot \
 		--without-mingle --without-gossip
+
+# beat 是**排期进程**，不是 worker：它只负责按点把任务投进队列，真正干活的还是
+# worker。两个都要起 —— 只起 worker 的症状是「告警一条都不来」，而那看起来跟
+# 「一切正常」一模一样。
+#
+# --schedule 落到 /tmp：beat 要记住「上次是什么时候投的」，默认写在当前目录下，
+# 于是仓库里会多出一个 celerybeat-schedule 文件（.gitignore 兜着，但没必要生成）。
+beat: ## 起 Celery beat，按排期投巡检任务（依赖得先 make up）
+	$(UV) run celery -A adpilot.tasks.app beat --loglevel=info \
+		--schedule=/tmp/adpilot-celerybeat-schedule
 
 fmt: ## 就地格式化 + 自动修可修的 lint（会改文件）
 	$(UV) run ruff format .

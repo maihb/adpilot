@@ -23,7 +23,7 @@ from httpx import ASGITransport, AsyncClient
 from pydantic import SecretStr
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from adpilot.api.deps import get_celery, get_mongo, get_session
+from adpilot.api.deps import get_celery, get_mongo, get_session, get_settings
 from adpilot.config import Environment, Settings
 from adpilot.db import broker
 from adpilot.db import mongo as mongo_db
@@ -195,6 +195,9 @@ async def live_api(
     app.dependency_overrides[get_session] = lambda: live_session
     app.dependency_overrides[get_mongo] = lambda: live_mongo
     app.dependency_overrides[get_celery] = lambda: memory_celery
+    # 不跑 lifespan 就没有 app.state.resources，而 Settings 默认是从那里取的。
+    # 覆盖掉它，这组用例才不依赖「进程级资源容器建起来了没有」。
+    app.dependency_overrides[get_settings] = lambda: live_settings
     async with AsyncClient(
         transport=ASGITransport(app=app),
         base_url="http://test",

@@ -12,10 +12,10 @@
 
 ## 领域
 
-> **D6–D8 的验收标准达成了两条**：任务异步跑、失败重试（D6），余额告警能触发
-> （D7）。整条链现在是 客户与账户 → 文件导入 → Mongo 原始快照 →（RabbitMQ）→
-> 归一化 upsert → 按天查询 → 余额规则 → 告警清单。**还差的是 D8**：定时巡检
-> （Celery beat）、告警通知，以及库存断货与指标异动那两条规则。下表是
+> **D6–D8 的验收标准全部达成**：任务异步跑、失败重试、余额告警能触发。整条链
+> 现在是 客户与账户 → 文件导入 → Mongo 原始快照 →（RabbitMQ）→ 归一化 upsert →
+> 按天查询 →（每小时 beat）→ 规则巡检 → 告警状态机 → webhook。**下一段是 D9–D11**
+> 的 uni-app 客户端；库存断货那条规则还欠着（它需要一个全新的数据域）。下表是
 > [设计文档第六、七节](../design/2026-08-19-mvp-design.md)定下的范围，落一个
 > 勾一个。**「状态」这一列不许提前打勾** —— 一张说自己有东西但其实没有的表，
 > 比没有这张表更糟。
@@ -31,8 +31,8 @@
 | [数据接入](imports.md) | `imports` | `ReportProvider` 适配器注册表、文件导入、原始快照落盘 | `providers/` `services/imports.py` | ✅ D3：CSV 导入与 append-only 落盘已通，Excel 与拉取调度未做 |
 | [日指标](metrics.md) | `metrics` | 平台字段 → 统一口径、唯一键 upsert、按天查询与派生指标 | `services/field_maps.py` `services/normalize.py` `services/daily_metric.py` | ✅ D3–D5：归一化与按天查询已通；聚合与环比未做 |
 | [异步任务](tasks.md) | `tasks` | Celery + RabbitMQ、重试与死信队列、任务状态查询 | `db/broker.py` `tasks/` `services/task.py` | ✅ D6：归一化已异步化；定时调度未做 |
-| [余额与告警](balances.md) | `balances` | 余额快照录入、可撑天数、告警清单 | `rules/balance.py` `services/balance.py` | ✅ D7：告警能触发；定时巡检与通知未做 |
-| 其它规则 | — | 库存断货、指标异动 | `rules/`（🚧） | 🚧 D8 |
+| [余额与账户](balances.md) | `balances` | 余额快照录入、可撑天数 | `rules/balance.py` `services/balance.py` | ✅ D7 |
+| [告警与巡检](alerts.md) | `alerts` | 状态机去重、定时巡检、指标异动、webhook 推送 | `rules/anomaly.py` `services/alert.py` `tasks/alerts.py` `notifiers/` | ✅ D8：巡检自动跑、同一件事只报一次；库存断货未做 |
 | 操作记录 | — | 「本期做了什么」的唯一数据来源，**发布日报前校验非空** | `services/actions.py`（🚧） | 🚧 D6–D8 |
 | 日报 | — | 生成、人工修订、发布、**快照固定** | `services/reports.py`（🚧） | 🚧 D12–D13 |
 | LLM | — | 日报撰写、异常诊断、调用成本记录 | `llm/`（🚧） | 🚧 D12–D13 |

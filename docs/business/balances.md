@@ -7,6 +7,9 @@
 
 **范围出处**：[设计文档 §2.2](../design/2026-08-19-mvp-design.md) · 里程碑 D7
 
+> 跨账户的余额清单（`GET /api/alerts/balances`）和「谁去看、要不要重复提醒」都在
+> [告警与巡检](alerts.md)那一篇 —— 所有 `/alerts*` 归一处。这一篇只讲余额本身。
+
 **OpenAPI tag**：`balances`
 
 ## 一句话职责
@@ -28,7 +31,6 @@
 | `recordBalance` | `POST /api/ad-accounts/{id}/balances` | 录一条余额快照 |
 | `listBalances` | `GET /api/ad-accounts/{id}/balances` | 该账户的余额快照，最新在前 |
 | `getBalanceRunway` | `GET /api/ad-accounts/{id}/balance-runway` | 这个账户还能撑几天 |
-| `listBalanceAlerts` | `GET /api/alerts/balances` | 所有在投账户的余额清单，最紧急在前 |
 
 ## 能读文档就够的部分
 
@@ -78,10 +80,6 @@
   起来会双倍计费 → 日均翻倍 → 可撑天数腰斩 → 一条凭空冒出来的告警，而这条告警
   长得跟真的一模一样。
 
-- **告警清单没有分页**（`api/balance.py` 的 `listBalanceAlerts`）。这是一张给人
-  当天处理用的清单，长到需要翻页说明该先去补余额数据，而不是往后翻。这是个刻意
-  的决定，不是漏了。
-
 - **`rules/` 够不着数据库，这条有机器强制**（`pyproject.toml` 的分层契约）。
   规则压在 `providers | db` 之下，所以想在 `rules/balance.py` 里写一句
   `select(...)` 会被 import-linter 当场拦下。要加数据来源就往 `services/` 加，
@@ -89,10 +87,6 @@
 
 ## 已知残余
 
-- **没有定时巡检，也没有通知。** 现在只有查询接口，得有人去看。Celery beat 还没
-  接（见[异步任务](tasks.md)的「已知残余」），D8 接上之后这条链是
-  `beat → 扫一遍 → 有变化才通知`，那时需要一张 alerts 表来记「已经通知过」，
-  否则每次巡检都会把同一条重发一遍。
 - ⚠️ **两个参数都还没有业务定论**（回看 7 天、阈值 3 天）。定下来的当天只改
   `rules/balance.py` 的两个常量，并回 [glossary](glossary.md) 把值填死。
 - **不做币种换算。** 余额和消耗都是账户币种，两者相除没问题；但跨账户的告警清单
