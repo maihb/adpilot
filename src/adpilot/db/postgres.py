@@ -36,11 +36,27 @@ NAMING_CONVENTION = {
 class Base(DeclarativeBase):
     """全项目 ORM 模型的声明式基类。
 
-    模型定义都在 `adpilot.models`，那里是表结构的真相源；这里只提供基类和
-    上面那套命名约定。
+    模型定义都在 `adpilot.models`，那里是表结构的真相源；这里只提供基类、
+    上面那套命名约定，以及下面这个 async 下必须打开的开关。
     """
 
     metadata = MetaData(naming_convention=NAMING_CONVENTION)
+
+    # eager_defaults=True 让 **UPDATE** 也带上 RETURNING，把服务端生成的值当场
+    # 取回来。默认的 "auto" 只对 INSERT 这么做，于是 `TimestampMixin` 那个
+    # `onupdate=func.now()` 在一次 UPDATE 之后处于 expired 状态 —— 谁碰它谁就
+    # 触发一次隐式的属性加载。
+    #
+    # 在同步 SQLAlchemy 里这只是多一条 SELECT，在 async 下是**崩**：出参序列化
+    # （Pydantic 的 model_validate）是同步调用，触发懒加载就抛 MissingGreenlet，
+    # 而那个报错跟真正的原因（某个列被 expire 了）之间毫无线索可循。
+
+    # 下面那行压掉 RUF012 的理由（注意别让本行以 noqa 开头，ruff 会把它当成一条
+    # 真的指令）：SQLAlchemy 在 DeclarativeBase 上把 `__mapper_args__` 声明成了
+    # 实例变量，按 RUF012 的建议标 ClassVar，mypy 就报「不能用类变量覆盖实例变量」
+    # —— 两个门禁在这一行上互斥。这里的字典是类级配置，不存在 RUF012 真正担心的
+    # 「实例间共享可变状态」。
+    __mapper_args__ = {"eager_defaults": True}  # noqa: RUF012
 
 
 def create_engine(settings: Settings) -> AsyncEngine:

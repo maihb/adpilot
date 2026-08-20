@@ -2,7 +2,7 @@
 
 本地跑：
 
-    uv run uvicorn adpilot.main:app --reload
+    uv run uvicorn adpilot.main:app --reload --reload-dir src
 """
 
 from __future__ import annotations
@@ -13,7 +13,8 @@ from contextlib import asynccontextmanager
 import structlog
 from fastapi import FastAPI
 
-from adpilot.api import health
+from adpilot.api import ad_account, client, health
+from adpilot.api.errors import install_error_handlers
 from adpilot.config import Settings, get_settings
 from adpilot.logging import configure_logging
 from adpilot.resources import open_resources
@@ -51,7 +52,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         openapi_url="/openapi.json",
     )
 
+    install_error_handlers(app)
+
     app.include_router(health.router, prefix=settings.api_prefix)
+    app.include_router(client.router, prefix=settings.api_prefix)
+    app.include_router(ad_account.router, prefix=settings.api_prefix)
     return app
 
 

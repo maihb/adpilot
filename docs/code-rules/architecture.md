@@ -3,9 +3,10 @@
 技术选型的来龙去脉在[设计文档第四节](../design/2026-08-19-mvp-design.md)，这里只讲
 **代码怎么摆、依赖往哪个方向走**。
 
-> **进度**：D1–D2 完成，D3 起了个头 —— 接入骨架（配置、三个客户端、健康检查）
-> 之外，现在有了 `models/` 与 Alembic 迁移。下面标了 🚧 的目录还不存在 ——
-> 先把位置定下来，是为了三个人（或三个 agent）各写各的时候不会摆出三套结构。
+> **进度**：D1–D2 完成，D3 过半 —— 骨架（配置、三个客户端、健康检查）之外，
+> `models/` + Alembic 迁移、`schemas/`、`services/` 都已落地，客户与账户这个领域
+> 端到端可用。下面仍标 🚧 的目录还不存在 —— 先把位置定下来，是为了三个人
+> （或三个 agent）各写各的时候不会摆出三套结构。
 
 ---
 
@@ -23,12 +24,16 @@ src/adpilot/
     redis.py        限流令牌桶与热点缓存的客户端
   api/
     deps.py         FastAPI 依赖 + Annotated 别名（ResourcesDep/SessionDep/…）
+    errors.py       领域异常 → HTTP 状态码，**唯一的翻译点**
+    pagination.py   分页入参（page / page_size，硬上限 100）
     health.py       存活与就绪探针 —— 加接口时照着它的写法抄
   models/           SQLAlchemy ORM 模型，一个领域一个文件 —— **表结构的真相源**
     types.py        自定义列类型（StrEnum 存 varchar，不用 PG 原生 ENUM）
     mixins.py       共用列（created_at / updated_at）
-  schemas/      🚧  对外的 Pydantic 出入参（与 ORM 模型分开，理由见下）
-  services/     🚧  业务逻辑，不认识 HTTP
+  schemas/          对外的 Pydantic 出入参（与 ORM 模型分开，理由见下）
+    errors.py       错误响应的形状，与 FastAPI 自带的 detail 对齐
+  services/         业务逻辑，不认识 HTTP
+    exceptions.py   领域异常 —— 只抛这一族，状态码不在这里决定
   providers/    🚧  ReportProvider 适配器注册表（文件导入 / Meta / TikTok）
   rules/        🚧  规则引擎：余额可撑天数、断货预警、指标异动。纯函数，好测
   llm/          🚧  LLM 适配器与提示词，输出必须过 Pydantic 校验

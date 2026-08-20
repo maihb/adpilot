@@ -17,9 +17,11 @@ from collections.abc import AsyncIterator, Iterator
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from httpx import ASGITransport, AsyncClient
 from pydantic import SecretStr
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from adpilot.api.deps import get_session
 from adpilot.config import Environment, Settings
 from adpilot.db.postgres import create_engine
 from adpilot.main import create_app
@@ -111,3 +113,32 @@ async def live_session(live_settings: Settings) -> AsyncIterator[AsyncSession]:
             await transaction.rollback()
     finally:
         await engine.dispose()
+
+
+@pytest.fixture
+async def live_api(
+    live_settings: Settings,
+    live_session: AsyncSession,
+) -> AsyncIterator[AsyncClient]:
+    """打真实数据库、但用例结束整体回滚的 HTTP 客户端。
+
+    **为什么不是 `TestClient`。** 它在自己的线程里跑一个独立的事件循环，而
+    asyncpg 的连接绑定在创建它的那个循环上 —— 把 `live_session` 交给它，第一次
+    查询就会炸在「attached to a different loop」上。`ASGITransport` 直接在当前
+    循环里调用应用，两边才是同一个 loop。
+
+    override 掉 `get_session` 顺带带来一个好处：应用不再需要
+    `app.state.resources`，所以这里不跑 lifespan，这组测试也就不依赖 Mongo 和
+    Redis 起没起 —— 它们验的是 HTTP 契约和 PostgreSQL 那条链路。
+
+    代价要知道：真实请求走的是 `session_scope`（返回即 commit），而这里的会话
+    由夹具管，**handler 里不会发生真正的提交**。提交这一步由 `session_scope`
+    保证，`test_health.py` 的集成用例覆盖了那条路径。
+    """
+    app = create_app(live_settings)
+    app.dependency_overrides[get_session] = lambda: live_session
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+    ) as api:
+        yield api
