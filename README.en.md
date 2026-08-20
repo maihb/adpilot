@@ -105,6 +105,10 @@ docker compose up -d
 # Create the tables. Auto-migrating on startup is deliberately not done —
 # it would mean you never see what it executed.
 docker compose run --rm api alembic upgrade head
+
+# Load anonymised sample data. Optional, but without it every endpoint
+# below returns an empty list.
+docker compose run --rm api python -m adpilot.seed
 ```
 
 Then:
@@ -114,6 +118,25 @@ Then:
 | API docs (Swagger) | http://localhost:8000/docs |
 | Liveness | http://localhost:8000/api/health/live |
 | Readiness (probes every dependency) | http://localhost:8000/api/health/ready |
+
+The sample data is 3 clients and 4 ad accounts with 28 days of daily metrics,
+spanning Meta / TikTok, three currencies and three time zones. It **only adds,
+never overwrites**, so re-running is safe; it refuses to run when
+`ENVIRONMENT=prod`.
+
+Each account demonstrates a different rule outcome, so one sweep should produce
+**exactly** two alerts:
+
+```bash
+curl -X POST localhost:8000/api/alerts/sweep   # normally driven hourly by beat
+curl localhost:8000/api/alerts
+```
+
+One is a prepaid account with roughly 2 days of balance left; the other spent the
+same money yesterday for half the conversions (CPA doubled). The third account is
+healthy, and the fourth is paused — it exists to prove that when average daily
+spend is 0, runway is **undefined** rather than zero, and nothing is alerted.
+That edge is the one most easily written as "0 days, alert immediately".
 
 ### Working on it
 
@@ -133,6 +156,7 @@ make worker       # in a second terminal: run the Celery worker on the adpilot q
 make beat         # and a third: run the scheduler (hourly alert sweep depends on it)
 make check        # run before pushing: all four CI gates in one go
 make migrate      # bring the database up to the latest schema
+make seed         # load anonymised sample data (run make migrate first)
 make revision m='add column xxx'   # draft a migration after editing models/ — **review it before committing**
 make test-int     # integration tests, needs the `make up` stack + `make migrate` first
 make up / down / logs

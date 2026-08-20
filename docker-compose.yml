@@ -84,6 +84,12 @@ services:
     # `celery inspect ping`，而远程控制在 RabbitMQ 4 上根本用不了（理由见
     # db/broker.py）。剩下的招数只能探到「进程还在」—— 那件事 `restart` 已经管了，
     # 写一个只会给出「健康」这个假信号。要知道 worker 在干什么，看它的日志。
+    #
+    # 🔴 **必须显式 disable，光是「不写」不够。** healthcheck 在 Dockerfile 里，
+    # 是镜像级的，而这三个服务共用同一个镜像 —— 不禁用的话 worker 会去探自己
+    # 根本没监听的 8000 端口，`docker compose ps` 里永远挂着 unhealthy。
+    healthcheck:
+      disable: true
     restart: unless-stopped
 
   beat:
@@ -105,6 +111,9 @@ services:
       - --schedule=/tmp/celerybeat-schedule
     depends_on: *backends
     environment: *app-env
+    # 同 worker：镜像自带的 healthcheck 探的是 8000，beat 不监听端口。
+    healthcheck:
+      disable: true
     restart: unless-stopped
 
   postgres:

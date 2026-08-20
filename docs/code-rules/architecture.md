@@ -5,8 +5,9 @@
 
 > **进度**：D1–D8 完成 —— 骨架、四个客户端、`models/` + Alembic 迁移、`schemas/`、
 > `services/`、`providers/`、`tasks/`（含每小时的告警巡检）、`rules/`（余额可撑
-> 天数、指标周同比异动）和 `notifiers/` 都已落地。只剩 `llm/` 还标着 🚧 —— 先把
-> 位置定下来，是为了三个人（或三个 agent）各写各的时候不会摆出三套结构。
+> 天数、指标周同比异动）和 `notifiers/` 都已落地，另有 `seed.py` 提供脱敏示例
+> 数据。只剩 `llm/` 还标着 🚧 —— 先把位置定下来，是为了三个人（或三个 agent）
+> 各写各的时候不会摆出三套结构。
 
 ---
 
@@ -18,6 +19,7 @@ src/adpilot/
   logging.py        structlog 配置：prod 出 JSON，dev 出彩色键值对
   resources.py      进程级资源容器：连接池在这里开、在这里关
   main.py           应用工厂 + lifespan，把 Resources 挂进 app.state
+  seed.py           脱敏示例数据（`make seed`）：只添不改，prod 下拒绝执行
   db/
     postgres.py     引擎、会话工厂、session_scope（提交/回滚的唯一出口）
     mongo.py        原始快照客户端；**双库边界写在这个模块的 docstring 里**
@@ -84,7 +86,9 @@ resources                 ← 进程级资源容器
       ↑
 api  ‖  tasks             ← 两个平级的入口：HTTP 请求 / RabbitMQ 消息。**互不 import**
       ↑
-main                      ← 组装（只组装 api；worker 的入口是 tasks/app.py）
+main  ‖  seed             ← 组装：main 把 api 装成应用，seed 把示例数据灌进库。
+                            **互不 import** —— main 认识 seed 就意味着 Web 进程
+                            启动时会去写示例数据
 ```
 
 只允许自下而上依赖，五条硬规矩：

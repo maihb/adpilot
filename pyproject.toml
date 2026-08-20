@@ -34,6 +34,8 @@ dev = [
     "httpx>=0.28",
     "import-linter>=2.13",
     "celery-types>=0.22",
+    "pyyaml>=6.0.3",
+    "types-pyyaml>=6.0.12.20260815",
 ]
 
 [project.urls]
@@ -131,7 +133,11 @@ containers = ["adpilot"]
 # 而不是等依赖绕成一团之后再来考古。
 exhaustive = true
 layers = [
-    "main",
+    # seed 和 main 都是「组装 + 入口」：一个把 api 装成应用，一个把示例数据灌进库。
+    # 摆在同一层而不是让 seed 更高，是因为它们之间没有依赖关系，而契约会额外验证
+    # 这一点 —— main 有朝一日 import seed，就意味着 Web 进程启动时会去写示例数据，
+    # 那正是这个模块最不该发生的事。
+    "main | seed",
     # 同层用 | 分隔，契约会额外验证它们**互不 import**。
     #
     # api 和 tasks 是两个平级的入口：一个由 HTTP 请求驱动，一个由 RabbitMQ 里的

@@ -77,6 +77,8 @@
 | **make 只放已授权的 target** | `settings.json` 逐条精确列出；`Bash(make:*)` 刻意不加 —— target 里能写任意命令，通配一条就等于给守卫开后门。新 target 默认不授权 |
 | **celery 只放 worker / beat 子命令** | `settings.json` 里逐条列出，不是 `uv run celery:*` —— 同一个 CLI 底下还有 `purge`（清空队列）和 `control`（远程指挥 worker） |
 | **worker / beat 的启动参数不许被删** | `tests/test_tasks.py` 同时盯着 Makefile 和 compose：`--without-mingle` / `--without-gossip`（少了 RabbitMQ 4 上起不来）、`-Q adpilot`（少了一条消息都不处理）、以及「有没有 beat 的启动方式」 |
+| **不监听端口的服务要显式关掉 healthcheck** | 同上那个文件。`HEALTHCHECK` 在 Dockerfile 里是**镜像级**的，三个进程共用一个镜像 —— worker / beat 不禁用就永远 unhealthy，而一个恒为红的健康灯会让人对整列输出脱敏 |
+| **示例数据一眼看得出是假的** | `tests/test_seed.py`：客户名要 `示例｜` 前缀、账户与系列 ID 要 `demo-` 前缀。同一个文件还盯着「跑完恰好两条告警」—— 那个数字写在 README 里 |
 | **迁移不悄悄删数据** | `tests/test_migration_safety.py`：`upgrade()` 里出现删表/删列，就必须在文件里写一行 `# DESTRUCTIVE-OK: <理由>`。只扫 `upgrade()` —— `downgrade()` 里的 drop 是回滚，每个建表迁移都有 |
 | **改了 model 别忘了生成迁移** | `alembic check` 跑在 CI 的集成 job 里（要连真实库） |
 | **分层依赖不许倒流** | `lint-imports`（import-linter）跑在 CI 里，契约就是 [`architecture.md`](docs/code-rules/architecture.md#分层与依赖方向) 那张图，配置在 `pyproject.toml`。`exhaustive` 开着 —— 新增顶层模块必须先在分层图里占个位置，不能先建了再说 |
@@ -137,6 +139,11 @@ uv run mypy src tests
 uv run lint-imports                              # 分层依赖契约，图见 architecture.md
 uv run pytest                                    # 单元测试，不需要外部服务
 RUN_INTEGRATION=1 uv run pytest -m integration   # 需要 compose 那套环境 + 先迁移
+
+# 脱敏示例数据。只添不改（重复跑安全），ENVIRONMENT=prod 时拒绝执行且**没有
+# --force**。四个示例账户各演示一种规则结局，跑完巡检应当恰好两条告警 ——
+# 那个数字有测试盯着（tests/test_seed.py）。
+uv run python -m adpilot.seed
 
 uv run alembic upgrade head                      # 把库升到最新 schema
 uv run alembic revision --autogenerate -m "..."  # 生成迁移草稿，**必须人看一遍**

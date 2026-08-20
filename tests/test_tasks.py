@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import yaml
 from celery import Celery
 from celery.exceptions import Reject
 from kombu import Connection
@@ -139,6 +140,24 @@ def test_worker_command_carries_the_flags_that_config_cannot(path: str) -> None:
     assert "--without-mingle" in command
     assert "--without-gossip" in command
     assert MAIN_QUEUE in command
+
+
+@pytest.mark.parametrize("service", ["worker", "beat"])
+def test_processes_without_a_port_disable_the_inherited_healthcheck(service: str) -> None:
+    """🔴 不监听端口的服务必须**显式**关掉镜像自带的 healthcheck。
+
+    `HEALTHCHECK` 写在 Dockerfile 里，是**镜像级**的，而 api / worker / beat 共用
+    同一个镜像（那是刻意的：镜像分家只会让「代码更新了但 worker 还是旧的」变成
+    一类新故障）。于是不禁用的话，worker 会去探自己根本没监听的 8000 端口，
+    `docker compose ps` 里永远挂着 unhealthy。
+
+    这不只是难看：**一个恒为红的健康灯会让人对整列输出脱敏**，于是 api 真的红了
+    那一次也不会有人注意到。compose 里「刻意没有 healthcheck」那句注释在这条
+    测试出现之前，是一句不成立的话 —— 光是「不写」不够，继承会补上。
+    """
+    compose = yaml.safe_load((REPO_ROOT / "docker-compose.yml").read_text(encoding="utf-8"))
+
+    assert compose["services"][service]["healthcheck"] == {"disable": True}
 
 
 @pytest.mark.parametrize("path", ["Makefile", "docker-compose.yml"])

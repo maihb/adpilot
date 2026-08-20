@@ -91,6 +91,9 @@ docker compose up -d
 
 # 建表。刻意不做「启动时自动迁移」—— 那意味着你看不见它执行了什么
 docker compose run --rm api alembic upgrade head
+
+# 灌一批脱敏示例数据。不灌也能跑，但下面每个接口都会返回空列表
+docker compose run --rm api python -m adpilot.seed
 ```
 
 然后：
@@ -100,6 +103,20 @@ docker compose run --rm api alembic upgrade head
 | 接口文档（Swagger） | http://localhost:8000/docs |
 | 存活探针 | http://localhost:8000/api/health/live |
 | 就绪探针（逐个探测依赖） | http://localhost:8000/api/health/ready |
+
+示例数据是 3 个客户、4 个广告账户、28 天日指标，跨 Meta / TikTok、跨三种币种与三个
+时区。它**只添不改**，重复跑安全；`ENVIRONMENT=prod` 时直接拒绝执行。
+
+四个账户各自演示一种规则结局，所以跑一次巡检应当**恰好**得到两条告警：
+
+```bash
+curl -X POST localhost:8000/api/alerts/sweep   # 平时由 beat 每小时自动跑
+curl localhost:8000/api/alerts
+```
+
+一条是余额只够撑约 2 天的预充账户，一条是昨天花一样的钱、转化少了一半（CPA 翻倍）
+的账户。第三个账户一切正常，第四个暂停投放 —— 它专门用来验证「日均消耗为 0 时可撑
+天数是**无定义**，不告警」，那条边界最容易被写成「0 天，立刻告警」。
 
 ### 开发
 
@@ -119,6 +136,7 @@ make worker       # 另开一个终端：起 Celery worker，消费 adpilot 队�
 make beat         # 再开一个：起定时排期（每小时的告警巡检靠它）
 make check        # 推送前跑这条：CI 卡的四道门禁一次跑完
 make migrate      # 把库升到最新 schema
+make seed         # 灌脱敏示例数据（先 make migrate）
 make revision m='加一列 xxx'   # 改完 models/ 生成迁移草稿，**要人看一遍再提交**
 make test-int     # 集成测试，需要 make up 那套环境 + 先 make migrate
 make up / down / logs

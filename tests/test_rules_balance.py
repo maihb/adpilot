@@ -107,6 +107,19 @@ class TestAverageDailySpend:
         """
         assert rules.average_daily_spend(D(300), days_with_data=6) == D(50)
 
+    def test_result_is_quantized_to_money_precision(self) -> None:
+        """除不尽时要停在金额精度上，不能一路算到二十几位。
+
+        这不是洁癖：这个值有两个出口，一个是告警里的人话、一个是 `detail` JSONB。
+        漏掉量化的时候，告警原文长这样 ——
+
+            余额只够撑 2.0 天（还剩 351.2571 USD，近期日均 175.6285714285714285714285714）
+
+        天数那边 quantize 了，日均漏了，于是同一句话里两个金额位数差了二十位。
+        """
+        assert rules.average_daily_spend(D("1229.4"), days_with_data=7) == D("175.6286")
+        assert rules.average_daily_spend(D(100), days_with_data=3) == D("33.3333")
+
     @pytest.mark.parametrize("days", [0, -1])
     def test_no_data_at_all_yields_zero_which_reads_as_undefined(self, days: int) -> None:
         """一天数据都没有 → 0，再由 runway() 判成「无定义」。

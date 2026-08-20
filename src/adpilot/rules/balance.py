@@ -33,6 +33,14 @@ ALERT_THRESHOLD_DAYS = Decimal(3)
 #: 「还能撑 2.3333333 天」这种没人需要的精度。
 _QUANTUM = Decimal("0.1")
 
+#: 日均消耗保留几位小数。它是**金额**，所以对齐 `numeric(20,4)` 那个列精度 ——
+#: 告警消息里「还剩 351.2571 USD，近期日均 175.6286」两个数位数一致才读得下去。
+#:
+#: 上面那条注释说的毛病，日均自己也犯过：总花费除以天数除不尽时，Decimal 会一路
+#: 算到二十几位，于是告警原文长这样 ——「近期日均 175.6285714285714285714285714」。
+#: 天数那边 quantize 了，这边漏了。
+_MONEY_QUANTUM = Decimal("0.0001")
+
 
 @dataclass(frozen=True, slots=True)
 class BalanceRunway:
@@ -105,4 +113,6 @@ def average_daily_spend(total_spend: Decimal, days_with_data: int) -> Decimal:
     """
     if days_with_data <= 0:
         return Decimal(0)
-    return total_spend / days_with_data
+    # 在**产地**量化，不留给调用方：这个值有两个出口（告警消息里的一句人话、
+    # `detail` JSONB 里的一个字段），漏掉任一个都会让二十几位小数漏出去。
+    return (total_spend / days_with_data).quantize(_MONEY_QUANTUM)

@@ -58,6 +58,12 @@ EXPOSE 8000
 
 # 这里探的是存活而不是就绪：数据库连不上意味着「暂时不能接流量」，
 # 不等于「这个容器坏了，该换掉」。
+#
+# 🔴 **这条是镜像级的，而 api / worker / beat 共用同一个镜像。** worker 和 beat
+# 不监听 8000，继承这条探针的结果是它们永远 unhealthy —— 一个恒为红的健康灯
+# 和没有健康灯一样没用，更糟的是它会让人对 `docker compose ps` 的输出脱敏，
+# 于是 api 真的红了那次也不会有人注意。所以 compose 里给那两个服务显式
+# `healthcheck: disable: true`，理由写在它们各自的定义上。
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
     CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/health/live', timeout=2).status == 200 else 1)"
 

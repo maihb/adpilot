@@ -19,6 +19,7 @@
       "Bash(make check)",
       "Bash(make migrate)",
       "Bash(make revision:*)",
+      "Bash(make seed)",
       "Bash(make up)",
       "Bash(make down)",
       "Bash(make logs)",
@@ -43,6 +44,7 @@
       "Bash(uv run celery -A adpilot.tasks.app worker:*)",
       "Bash(uv run celery -A adpilot.tasks.app beat:*)",
       "Bash(uv run python -c:*)",
+      "Bash(uv run python -m adpilot.seed)",
       "Bash(RUN_INTEGRATION=1 uv run pytest:*)",
 
       "Bash(docker:*)",

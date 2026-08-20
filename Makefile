@@ -26,7 +26,7 @@ COMPOSE ?= docker compose
 
 .DEFAULT_GOAL := help
 
-.PHONY: help bootstrap env setup dev worker beat lint fmt types imports test test-int check migrate revision up down logs ps
+.PHONY: help bootstrap env setup dev worker beat seed lint fmt types imports test test-int check migrate revision up down logs ps
 
 help: ## 显示这份清单
 	@awk 'BEGIN {FS = ":.*##"} \
@@ -86,6 +86,14 @@ worker: ## 起 Celery worker，消费 adpilot 队列（依赖得先 make up）
 beat: ## 起 Celery beat，按排期投巡检任务（依赖得先 make up）
 	$(UV) run celery -A adpilot.tasks.app beat --loglevel=info \
 		--schedule=/tmp/adpilot-celerybeat-schedule
+
+# 要先 make migrate —— 表还没建出来的时候跑它，报的是 UndefinedTable，跟「示例数据
+# 有问题」看不出关系。
+#
+# 只添不改、重复跑安全；ENVIRONMENT=prod 时直接拒绝，且**没有 --force**。
+# 完整说明在 src/adpilot/seed.py 的模块 docstring。
+seed: ## 灌一批脱敏示例数据（先 make migrate）
+	$(UV) run python -m adpilot.seed
 
 fmt: ## 就地格式化 + 自动修可修的 lint（会改文件）
 	$(UV) run ruff format .
