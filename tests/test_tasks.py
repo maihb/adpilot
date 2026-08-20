@@ -23,6 +23,7 @@ from typing import Any
 
 import pytest
 import yaml
+from amqp.exceptions import NotFound
 from celery import Celery
 from celery.exceptions import Reject
 from kombu import Connection
@@ -398,9 +399,13 @@ async def test_a_real_broker_accepts_the_queue_declaration_and_the_message(
     重连），消息也确实落进了 `adpilot` 队列。
 
     收回来还有一个副作用是必要的：**别在共享队列里留垃圾**。
+
+    ⚠️ **要求没有别的消费者挂在队列上**，否则先跳过（下面那个函数解释了为什么不能
+    绕开这个前提）。
     """
     app = broker.create_celery_app(live_settings)
     try:
+        _skip_if_a_consumer_is_attached(app)
         # 走生产代码那条投递路径，不是手拼一条 send_task —— 那样测的就只是 Celery
         # 自己了，参数名写错照样绿。
         task_id = await task_service.enqueue_normalize(app, account_id=-1)
@@ -412,6 +417,44 @@ async def test_a_real_broker_accepts_the_queue_declaration_and_the_message(
         }
     finally:
         app.close()
+
+
+def _skip_if_a_consumer_is_attached(app: Celery) -> None:
+    """业务队列上挂着别的消费者就跳过这条用例。
+
+    🔴 **这不是「测试不稳定」，是前提不成立。** 上面那条用例要自己把发出去的消息收
+    回来，而 `docker compose up` 起的 worker 正订阅着同一个 `adpilot` 队列 —— 它会
+    抢先消费掉，于是断言等在一个永远不会到货的消息上，最后报「队列里没有等到那条
+    消息」。那个报错指向的方向是错的：看起来像投递坏了，实际是有人先拿走了。
+
+    **为什么不改成投递到一条专属的测试队列**（那样就不会撞车了）：这条用例的价值
+    在于它走 `task_service.enqueue_normalize` 那条**生产投递路径**，而投到哪个队列
+    正是那条路径上的配置。换个队列名就得绕开路由配置，等于把最值钱的部分测没了。
+
+    所以选择 skip 而不是回避：「worker 正在跑」是合法的开发状态，不是代码缺陷。
+    CI 的集成 job 只起 service container、不起 worker，所以那边始终真跑 —— 覆盖不丢，
+    只是本地开着全套环境时诚实地跳过。
+    """
+    main_queue = broker.build_queues()[0]
+    with Connection(app.conf.broker_url) as connection:
+        try:
+            # passive=True：只问状态、不碰声明。队列还没建出来时抛 NotFound，
+            # 那种情况下自然也不会有消费者。
+            declared = main_queue(connection.channel()).queue_declare(passive=True)
+        except NotFound:
+            return
+
+    # kombu 把 queue_declare 的返回值标成了 str | None，实际给回来的是 amqp 的
+    # queue_declare_ok_t(queue, message_count, consumer_count)。上游标注不准，
+    # 取一次存下来，省得在两处各 ignore 一遍。
+    consumers: int = declared.consumer_count  # type: ignore[union-attr]
+
+    if consumers:
+        pytest.skip(
+            f"{MAIN_QUEUE} 上挂着 {consumers} 个消费者"
+            "（多半是 docker compose 起的 worker），它会抢先消费掉这条消息。"
+            "先 `docker compose stop worker` 再跑。"
+        )
 
 
 def _drain_one(app: Celery, *, task_id: str | None = None) -> dict[str, Any]:
