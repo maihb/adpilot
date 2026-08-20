@@ -40,6 +40,10 @@ from adpilot.tasks import normalize as normalize_task
 from adpilot.tasks import runtime
 from adpilot.tasks.app import AdpilotTask, celery_app
 
+# 锚在文件位置上而不是当前目录 —— 从别的目录跑 pytest 时，相对路径会读不到文件，
+# 而报错是「文件不存在」，跟这条用例要验的事情毫无关系。约定同 test_business_docs.py。
+REPO_ROOT = Path(__file__).resolve().parent.parent
+
 
 @pytest.fixture
 def in_memory_celery(offline_settings: Settings) -> Celery:
@@ -129,7 +133,7 @@ def test_worker_command_carries_the_flags_that_config_cannot(path: str) -> None:
     `-Q adpilot` 一起盯着：漏了它 worker 会去消费默认的 `celery` 队列，然后安静
     地跑着、一条消息都不处理 —— 连报错都没有。
     """
-    command = Path(path).read_text(encoding="utf-8")
+    command = (REPO_ROOT / path).read_text(encoding="utf-8")
 
     assert "--without-mingle" in command
     assert "--without-gossip" in command
