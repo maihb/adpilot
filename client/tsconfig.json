@@ -2,7 +2,9 @@
   "extends": "@vue/tsconfig/tsconfig.json",
   "compilerOptions": {
     "sourceMap": true,
-    "baseUrl": ".",
+    // 刻意没有 baseUrl：TS 4.1 起 paths 里的相对路径就按本文件所在目录解析，而
+    // TS 6.0 已把 baseUrl 标成弃用（TS5101）、7.0 会直接停止支持。留着它的唯一
+    // 效果是编辑器里两条红波浪线，以及升级 TypeScript 那天 CI 变红。
     "paths": {
       "@/*": ["./src/*"]
     },
