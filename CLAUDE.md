@@ -23,6 +23,7 @@
 | **加表 / 改字段、迁移怎么生成、autogenerate 有哪些盲区** | [`docs/design/2026-08-19-schema-migration.md`](docs/design/2026-08-19-schema-migration.md) |
 | **认证、授权作用域、两个前端怎么摆**（D9 起） | [`docs/design/2026-08-21-client-auth.md`](docs/design/2026-08-21-client-auth.md) |
 | **客户端有哪几屏、显示层那四个坑**（D10–D11） | [`docs/design/2026-08-21-client-app.md`](docs/design/2026-08-21-client-app.md) |
+| **内部后台怎么摆、写操作分几级**（D12） | [`docs/design/2026-08-21-admin-console.md`](docs/design/2026-08-21-admin-console.md) |
 | **加一个要认证的接口 / 客户端接口** | [`docs/business/auth.md`](docs/business/auth.md) + [`docs/business/portal.md`](docs/business/portal.md) |
 | **改客户端界面 / 加一屏**（四条显示口径规则） | [`docs/business/client-app.md`](docs/business/client-app.md) |
 | **代码摆在哪、依赖往哪个方向走** | [`docs/code-rules/architecture.md`](docs/code-rules/architecture.md) |
