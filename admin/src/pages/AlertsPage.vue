@@ -15,6 +15,7 @@ import { formatInstant } from '../utils/format'
 const KIND_NAMES: Record<string, string> = {
   balance_low: '余额',
   metric_anomaly: '指标异动',
+  stock_low: '库存',
 }
 
 const items = ref<Alert[]>([])
@@ -46,7 +47,7 @@ async function sweep(): Promise<void> {
   note.value = ''
   try {
     const summary = await sweepAlerts()
-    note.value = `巡检了 ${summary.accounts} 个账户：新开 ${summary.opened}，仍成立 ${summary.still_open}，自动收掉 ${summary.resolved}，推送 ${summary.notified}。`
+    note.value = `巡检了 ${summary.accounts} 个账户、${summary.clients} 个客户的库存：新开 ${summary.opened}，仍成立 ${summary.still_open}，自动收掉 ${summary.resolved}，推送 ${summary.notified}。`
     await load()
   } catch (error) {
     note.value = reason(error, '巡检失败')
@@ -101,7 +102,11 @@ function kindName(kind: string): string {
       </el-table-column>
       <el-table-column label="账户" width="90">
         <template #default="{ row }">
-          <router-link :to="`/accounts/${row.account_id}`">明细</router-link>
+          <!-- 🔴 account_id 可能是 null：库存断货是客户级告警（商品挂在客户上，
+               同一批货可能被多个账户在推）。不判空的话这里会渲染出一个指向
+               /accounts/null 的链接，点进去是 404，而它看起来只是「明细」。 -->
+          <router-link v-if="row.account_id" :to="`/accounts/${row.account_id}`">明细</router-link>
+          <span v-else class="muted">客户级</span>
         </template>
       </el-table-column>
     </el-table>
@@ -121,5 +126,8 @@ function kindName(kind: string): string {
 }
 .note {
   margin-bottom: 12px;
+}
+.muted {
+  color: var(--el-text-color-secondary);
 }
 </style>

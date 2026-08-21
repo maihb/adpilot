@@ -14,6 +14,9 @@ const routes: RouteRecordRaw[] = [
   // 首页就是导入。它是这个系统要替掉的那件手工活本身，也是运营每天用得最多的
   // 一屏 —— 藏在两层菜单后面，人就会退回去用 Excel。
   { path: '/', name: 'import', component: () => import('../pages/ImportPage.vue') },
+  // 库存紧挨着导入：它也是一件「把另一个后台的数搬过来」的手工活，而且是同一个
+  // 人在同一段时间里做的。
+  { path: '/stock', name: 'stock', component: () => import('../pages/StockPage.vue') },
   { path: '/alerts', name: 'alerts', component: () => import('../pages/AlertsPage.vue') },
   // 日报排在告警之后：运营的一天是「导入 → 看告警 → 出日报」。
   { path: '/reports', name: 'reports', component: () => import('../pages/ReportsPage.vue') },

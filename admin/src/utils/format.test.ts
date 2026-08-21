@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { NO_VALUE, formatInstant, formatMoney, formatPercent, fromLines, hoursUntil, toLines, toNumber } from './format'
+import { NO_VALUE, formatCount, formatInstant, formatMoney, formatPercent, fromLines, hoursUntil, toLines, toNumber } from './format'
 
 describe('toNumber', () => {
   it('🔴 null 回 null，绝不回 0', () => {
@@ -25,6 +25,11 @@ describe('格式化', () => {
     expect(formatMoney(null, 'USD')).toBe(NO_VALUE)
     expect(formatPercent(null)).toBe(NO_VALUE)
     expect(formatInstant(null)).toBe(NO_VALUE)
+    // 🔴 库存屏用它显示日均销量和可撑天数，两列都可能是 null：日均为 null 是
+    // 「算不出来」（只有一条快照），显示成 0 会读成「一件没卖」，而那两件事要
+    // 采取的行动完全相反 —— 前者要再导一次库存，后者不用管。
+    expect(formatCount(null)).toBe(NO_VALUE)
+    expect(formatCount('0')).toBe('0')
   })
 
   it('金额带币种和千分位', () => {

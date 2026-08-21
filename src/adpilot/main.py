@@ -25,6 +25,7 @@ from adpilot.api import (
     imports,
     invite,
     portal,
+    product,
     report,
     task,
 )
@@ -97,6 +98,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         imports.router,
         daily_metric.router,
         balance.router,
+        product.router,
         alert.router,
         action.router,
         report.router,

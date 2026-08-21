@@ -18,6 +18,9 @@ export type Balance = Schemas['BalanceItem']
 export type ImportResult = Schemas['ImportResponse']
 export type TaskStatus = Schemas['TaskStatusResponse']
 export type Report = Schemas['ReportItem']
+export type Product = Schemas['ProductItem']
+export type StockRunway = Schemas['StockRunwayResponse']
+export type StockImportResult = Schemas['StockImportResponse']
 export type ReportNarrative = Schemas['ReportNarrative']
 
 // —— 认证 ————————————————————————————————————————————————
@@ -183,4 +186,32 @@ export function reviseReport(
 /** 发布。两条硬校验在服务端（人工修订过、操作记录非空），不满足返回 409。 */
 export function publishReport(reportId: number): Promise<Report> {
   return request<Report>(`/reports/${reportId}/publish`, { method: 'POST' })
+}
+
+// —— 商品与库存 ————————————————————————————————————————
+//
+// 只有批量导入，没有单条录入 —— 和余额刚好相反：余额一个账户一个数，库存一个
+// 客户几十上百个 SKU（docs/business/stock.md）。
+
+export function listProducts(clientId: number): Promise<Schemas['ProductListResponse']> {
+  return request<Schemas['ProductListResponse']>(`/clients/${clientId}/products`, {
+    query: { page: 1, page_size: 200 },
+  })
+}
+
+/**
+ * 导一份库存表。
+ *
+ * **可逆的写操作**（admin.md 那三级里的第一级）：重传同一个时刻就是覆盖，导错了
+ * 再导一次即可 —— 所以它不需要二次确认。
+ */
+export function importStock(clientId: number, form: FormData): Promise<StockImportResult> {
+  return request<StockImportResult>(`/clients/${clientId}/stock-imports`, {
+    method: 'POST',
+    form,
+  })
+}
+
+export function listStockRunway(clientId: number): Promise<Schemas['StockRunwayListResponse']> {
+  return request<Schemas['StockRunwayListResponse']>(`/clients/${clientId}/stock-runway`)
 }

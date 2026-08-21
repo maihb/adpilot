@@ -20,22 +20,28 @@
 任何正当理由，而留一个开关就等于没有这道护栏。真要在类生产环境演示，改
 `ENVIRONMENT` —— 那是一个需要动手、且能在 `.env` 里看见的动作。
 
-## 四个账户覆盖四种规则结局
+## 四个账户 + 三个商品，覆盖七种规则结局
 
 示例数据不能只有 happy path，否则规则引擎有没有接对根本看不出来。跑完 `make seed`
 再跑一次巡检（`POST /api/alerts/sweep`，或等 beat 每小时那一次），应当**恰好**得到
-两条告警：
+三条告警：
 
-| 账户 | 规则结局 |
+| 对象 | 规则结局 |
 |---|---|
 | 家居优选 / Meta | 一切正常：余额够撑约 15 天，昨天指标平稳 |
 | 家居优选 / TikTok | 🔔 `balance_low` —— 余额只够撑约 2 天，低于 `rules/balance.py` 的阈值 |
 | 美妆日记 / Meta | 🔔 `metric_anomaly` —— 昨天花一样的钱、转化少了一半，CPA 翻倍 |
 | 户外装备 / TikTok | **不告警**：暂停投放，日均消耗为 0 → 可撑天数**无定义** |
+| 家居优选 / 亚麻四件套 | 🔔 `stock_low` —— 库存只够撑阈值一半那么多天。日均**来自导出文件** |
+| 家居优选 / 记忆棉枕头 | **不告警**：日均由两条快照的差**推算**出来，还能撑一个多月 |
+| 家居优选 / 香薰蜡烛 | **不告警**：只有一条快照 → 日均**算不出来** → 可撑天数无定义 |
 
-最后一行是这批数据里最有价值的一条：「没有消耗就不会归零」这条边界最容易被写成
-「0 天，立刻告警」，而那样的告警会让人对整个告警列表脱敏。有一份数据天天覆盖着它，
-比一句注释管用。
+最后一行和第四行是这批数据里最有价值的两条，而且是同一条边界的两次落地：「算不
+出来」既不是 0 也不是「没事」。它最容易被写成「0 天，立刻告警」，而那样的告警会让
+人对整个列表脱敏。有一份数据天天覆盖着它，比一句注释管用。
+
+**库存告警是客户级的**（`account_id` 为 NULL），所以它也顺带覆盖着「告警有两个
+层级」那条 —— 那一条如果写漏了，症状是巡检每小时新开一条一模一样的断货告警。
 
 ## 数字怎么来的
 
@@ -53,7 +59,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import date, datetime, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from random import Random
 from typing import Any
@@ -72,8 +78,10 @@ from adpilot.models.ad_account import AdAccount, Platform
 from adpilot.models.balance import Balance
 from adpilot.models.client import Client
 from adpilot.models.daily_metric import DailyMetric, MetricLevel
+from adpilot.models.product import Product, StockSnapshot
 from adpilot.models.report import Report
 from adpilot.rules import balance as balance_rules
+from adpilot.rules import stock as stock_rules
 from adpilot.services import action as action_service
 from adpilot.services import ad_account as ad_account_service
 from adpilot.services import balance as balance_service
@@ -159,12 +167,45 @@ class _Account:
 
 
 @dataclass(frozen=True, slots=True)
+class _Product:
+    """一个商品的画像。库存快照由它推出来。
+
+    **商品挂在客户上，不挂账户** —— 一个客户的多个投放账户推的是同一批货
+    （`models/product.py` 的类 docstring）。
+    """
+
+    sku: str
+    name: str
+
+    #: 最新一条快照的库存件数。
+    qty: Decimal
+
+    #: 店铺导出自带的日均销量。
+    #:
+    #: `None` **不是「没卖」而是「这份导出没有那一列」** —— 那时日均由
+    #: `rules/stock.py` 从两条快照的差推出来。两种来源各配一个示例商品，是因为
+    #: 出参里的 `sales_source` 只有在两种值都见过时才看得懂。
+    daily_sales: Decimal | None
+
+    #: 几天前那条快照的库存。`None` 表示**只造一条快照** —— 那时日均一定推不出来，
+    #: 专门用来演示「再导一次就能算了」和「已经断货」在界面上不是同一回事。
+    previous_qty: Decimal | None = None
+
+    #: 上一条快照是几天前的。
+    previous_days_ago: int = 4
+
+
+@dataclass(frozen=True, slots=True)
 class _Client:
     """一个客户及其账户。"""
 
     name: str
     note: str
     accounts: tuple[_Account, ...]
+
+    #: 这个客户店铺里的商品。**只有有在投账户的客户才值得配** —— 库存巡检跳过
+    #: 没有在投账户的客户（断货告警的意义是「广告还在跑，货没了」）。
+    products: tuple[_Product, ...] = ()
 
 
 # 🔴 名字、账户 ID、系列 ID 全部是**编造的**，且带 `示例` / `demo-` 前缀 ——
@@ -174,6 +215,38 @@ _PLAN: tuple[_Client, ...] = (
     _Client(
         name="示例｜家居优选",
         note="演示数据，非真实客户。两个账户同属美西时区，一个正常、一个余额告急。",
+        # 三个商品各演示库存规则的一种结局，和四个账户演示余额/异动是同一个套路。
+        products=(
+            # 🔔 stock_low —— 库存写成「阈值的一半那么多天」，跟着
+            # rules/stock.py 的 ALERT_THRESHOLD_DAYS 走而不是写死一个碰巧比它小的
+            # 数（同 _Account.balance_days 那条：阈值改了，这里的意图仍然成立）。
+            # 日均来自「店铺导出自带那一列」，于是 sales_source 是 file。
+            _Product(
+                sku="demo-sku-0001",
+                name="（示例）亚麻四件套 - 米白 1.8m",
+                qty=stock_rules.ALERT_THRESHOLD_DAYS * Decimal(6) / 2,
+                daily_sales=Decimal(6),
+                previous_qty=Decimal(42),
+            ),
+            # 不告警，且日均是**推算**出来的（导出没有销量列）：4 天掉了 60 件
+            # → 日均 15 → 640 件还能撑 42.7 天。sales_source 是 inferred。
+            _Product(
+                sku="demo-sku-0002",
+                name="（示例）记忆棉枕头 - 双人装",
+                qty=Decimal(640),
+                daily_sales=None,
+                previous_qty=Decimal(700),
+            ),
+            # 🔴 只有一条快照 → 日均**算不出来** → 可撑天数无定义，不告警。
+            # 这是这批库存数据里最有价值的一条：它和「已经断货」在页面上必须
+            # 长得不一样，而「算不出来就当 0」正是最容易写出来的那个 bug。
+            _Product(
+                sku="demo-sku-0003",
+                name="（示例）香薰蜡烛 - 雪松",
+                qty=Decimal(95),
+                daily_sales=None,
+            ),
+        ),
         accounts=(
             _Account(
                 external_id="demo-meta-0001",
@@ -285,6 +358,8 @@ class SeedSummary:
     balances_existing: int = 0
     actions_recorded: int = 0
     reports_published: int = 0
+    products_created: int = 0
+    stock_snapshots: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -590,20 +665,38 @@ async def _ensure_action(
     plan: _Account,
     account: AdAccount,
 ) -> bool:
-    """给这个账户补一条昨天的操作记录，已经有就跳过。返回是不是新写的。
+    """给这个账户补一条昨天的操作记录，**昨天**已经有就跳过。返回是不是新写的。
 
     **每个账户都要有**：没有操作记录的账户，日报连发都发不出去（`services/report.py`
     的 `publish` 硬校验）—— 而那正是这条示例数据要演示的东西。
+
+    🔴 **存在判断按「昨天那一天」，不是「这个账户有没有过操作记录」。**
+
+    后者是原先的写法，它有个只在**跨天之后**才现形的坑：`_ensure_report` 按
+    「昨天有没有日报」判断，于是第二天重跑 seed 会去生成新一天的日报，而操作记录
+    因为「反正有一条」被跳过 —— 新的那天一条都没有，publish 当场 409：「这一期
+    没有任何操作记录，发不出去」。
+
+    症状是 seed 昨天跑得好好的、今天原地报错，而报错信息指向日报、不指向这里。
     """
+    yesterday = _yesterday(plan.timezone)
+    account_tz = ZoneInfo(plan.timezone)
+    day_start = datetime.combine(yesterday, time(0, 0), tzinfo=account_tz)
+
     existing = await session.scalar(
-        select(Action.id).where(Action.account_id == account.id).limit(1)
+        select(Action.id)
+        .where(
+            Action.account_id == account.id,
+            Action.performed_at >= day_start,
+            Action.performed_at < day_start + timedelta(days=1),
+        )
+        .limit(1)
     )
     if existing is not None:
         return False
 
-    yesterday = _yesterday(plan.timezone)
     # 账户时区下的昨天中午。落在昨天那个自然日内，日报才捞得到它；也一定不在未来。
-    performed_at = datetime.combine(yesterday, time(12, 0), tzinfo=ZoneInfo(plan.timezone))
+    performed_at = datetime.combine(yesterday, time(12, 0), tzinfo=account_tz)
 
     summary, reason = (
         ("（示例）暂停该账户全部广告", "（示例）旺季结束，先停下来复盘素材再重启")
@@ -620,6 +713,79 @@ async def _ensure_action(
         operator="示例｜运营",
     )
     return True
+
+
+async def _ensure_stock(session: AsyncSession, plan: _Client, client: Client) -> tuple[int, int]:
+    """给一个客户造商品和库存快照，返回 (新建商品数, 新写快照数)。
+
+    快照的 `captured_at` 挑的是**确定的、必定在过去的时刻**（今天 09:00 之前那
+    几天的 09:00），理由同 `_ensure_balance`：取「现在」的话每次跑 seed 都是新的
+    一行，那就不幂等了。
+
+    ⚠️ 时区取 **UTC**，不像余额那样取账户时区 —— 商品挂在客户上，而一个客户的
+    几个账户可以在不同时区（`_PLAN` 里就有）。库存快照本来就是**时刻量**不是
+    自然日量（`models/product.py`），所以这里根本不需要挑一个「谁的自然日」。
+    """
+    if not plan.products:
+        return 0, 0
+
+    # 昨天 09:00 UTC 起往前排。用昨天而不是今天，是为了在任何时区下都已经过去。
+    latest_at = datetime.combine(
+        datetime.now(UTC).date() - timedelta(days=1), time(9, 0), tzinfo=UTC
+    )
+
+    products_created = 0
+    snapshots = 0
+    for product_plan in plan.products:
+        product = await session.scalar(
+            select(Product).where(
+                Product.client_id == client.id,
+                Product.sku == product_plan.sku,
+            )
+        )
+        if product is None:
+            product = Product(
+                client_id=client.id,
+                sku=product_plan.sku,
+                name=product_plan.name,
+            )
+            session.add(product)
+            await session.flush()
+            products_created += 1
+
+        wanted = [(latest_at, product_plan.qty, product_plan.daily_sales)]
+        if product_plan.previous_qty is not None:
+            wanted.append(
+                (
+                    latest_at - timedelta(days=product_plan.previous_days_ago),
+                    product_plan.previous_qty,
+                    # 🔴 旧那条**不带**日均销量：规则只看最新一条快照上的那一列，
+                    # 而把它也填上会让「从序列推」那条路在示例数据里永远走不到。
+                    None,
+                )
+            )
+
+        for captured_at, qty, daily_sales in wanted:
+            existing = await session.scalar(
+                select(StockSnapshot.id).where(
+                    StockSnapshot.product_id == product.id,
+                    StockSnapshot.captured_at == captured_at,
+                )
+            )
+            if existing is not None:
+                continue
+            session.add(
+                StockSnapshot(
+                    product_id=product.id,
+                    qty=qty,
+                    daily_sales=daily_sales,
+                    captured_at=captured_at,
+                    note="示例数据",
+                )
+            )
+            snapshots += 1
+
+    return products_created, snapshots
 
 
 async def _ensure_report(
@@ -675,10 +841,13 @@ async def seed(session: AsyncSession, settings: Settings) -> SeedSummary:
 
     for client_plan in _PLAN:
         client, client_created = await _ensure_client(session, client_plan)
+        products_created, stock_snapshots = await _ensure_stock(session, client_plan, client)
         summary = _bump(
             summary,
             clients_created=int(client_created),
             clients_existing=int(not client_created),
+            products_created=products_created,
+            stock_snapshots=stock_snapshots,
         )
 
         for account_plan in client_plan.accounts:
@@ -710,6 +879,8 @@ async def seed(session: AsyncSession, settings: Settings) -> SeedSummary:
         balances_recorded=summary.balances_recorded,
         actions_recorded=summary.actions_recorded,
         reports_published=summary.reports_published,
+        products_created=summary.products_created,
+        stock_snapshots=summary.stock_snapshots,
     )
     return summary
 
@@ -795,6 +966,7 @@ def main() -> None:
         f"  余额    新录 {summary.balances_recorded}，已存在 {summary.balances_existing}\n"
         f"  操作    新登记 {summary.actions_recorded} 条\n"
         f"  日报    新发布 {summary.reports_published} 份（昨天那天，人话是示例文案）\n"
+        f"  商品    新建 {summary.products_created}，库存快照新写 {summary.stock_snapshots} 条\n"
         "\n"
         "每个示例客户各一个邀请码（每次跑 seed 都新发，且只显示这一次）：\n"
         f"{invite_lines}\n"
@@ -805,7 +977,7 @@ def main() -> None:
         '      -d \'{"username":"admin","password":"你设的密码"}\' | jq -r .token)\n'
         '  curl -H "Authorization: Bearer $TOKEN" localhost:8000/api/clients\n'
         '  curl -H "Authorization: Bearer $TOKEN" -X POST localhost:8000/api/alerts/sweep'
-        "   # 应当得到 2 条告警\n"
+        "   # 应当得到 3 条告警\n"
         "\n"
         "客户那一侧不需要运营 token，拿其中任意一个码换一张 7 天的票：\n"
         f"  curl -sX POST localhost:8000/api/auth/redeem \\\n"
@@ -813,7 +985,8 @@ def main() -> None:
         f'      -d \'{{"code":"{idle_code}"}}\'\n'
         "\n"
         f"上面这个码是「{idle_client}」的 —— 它的账户已暂停投放，拿它进客户端可以看到\n"
-        "「可撑天数无定义」长什么样：那是「近期没花钱，算不出来」，不是「还能撑 0 天」。"
+        "「可撑天数无定义」长什么样：那是「近期没花钱，算不出来」，不是「还能撑 0 天」。\n"
+        f"第一个客户（{invites[0][0]}）那张票能看到另一半：一条**客户级**的断货告警。"
     )
 
 

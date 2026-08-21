@@ -638,6 +638,85 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/clients/{client_id}/stock-imports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Import Stock
+         * @description 导一份库存表：商品 upsert、快照 upsert。
+         *
+         *     **只有批量，没有单条录入** —— 和余额刚好相反。余额一个账户一个数，手工录合理；
+         *     库存一个客户几十上百个 SKU，手工录不现实。
+         *
+         *     列名自动认（`sku`/`商品编码`、`库存`/`stock`、可选的 `日均销量`），认不出必填
+         *     列会 422 并把表头列出来。**日均销量那一列是可选的**：没有它时日均由库存变化
+         *     推算，而那需要**至少两次导入**才有结果。
+         *
+         *     🔴 **文件里没出现的 SKU 一律不动，不视为库存归零。** 只导主推款、只导某个分类
+         *     都是常态，把「这次没导」读成「卖光了」会让每次部分导入都炸出一屏假告警。
+         *
+         *     **整份导入是幂等的**：同一个 (商品, 时刻) 重传就是覆盖，不像余额那样回 409 ——
+         *     库存是文件上传，重传同一份（网络断了、少了一列重来）是常态而不是误操作。
+         */
+        post: operations["importStock"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/clients/{client_id}/products": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Products
+         * @description 列出某客户的商品，按编码排序。
+         */
+        get: operations["listProducts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/clients/{client_id}/stock-runway": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Stock Runway
+         * @description 这个客户每个在售商品还能撑几天，最紧急的在前。
+         *
+         *     **默认给全部在售商品**（不只是告警的那些）：运营打开这一屏是来看整体的，
+         *     而「哪些算不出来」恰恰是要看见的信息 —— 那意味着还得再导一次库存。
+         *
+         *     没有任何快照的商品**不出现在这里**：没导过库存不等于库存是 0，混起来会让每个
+         *     刚建好的商品立刻显示成「已断货」。
+         */
+        get: operations["listStockRunway"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/alerts": {
         parameters: {
             query?: never;
@@ -1071,8 +1150,10 @@ export interface components {
         AlertItem: {
             /** Id */
             id: number;
+            /** Client Id */
+            client_id: number;
             /** Account Id */
-            account_id: number;
+            account_id: number | null;
             /** Kind */
             kind: string;
             /** Status */
@@ -1226,6 +1307,24 @@ export interface components {
              * @description 日期列名。不给就自动探测，探测不到会报错并列出表头
              */
             date_column?: string | null;
+        };
+        /** Body_importStock */
+        Body_importStock: {
+            /**
+             * File
+             * @description 店铺后台导出的库存表（CSV）
+             */
+            file: string;
+            /**
+             * Captured At
+             * @description 这批库存属于哪一刻，必须带时区。不给就取此刻
+             */
+            captured_at?: string | null;
+            /**
+             * Note
+             * @description 从哪导的、什么口径。会记在这一批的每条快照上
+             */
+            note?: string | null;
         };
         /**
          * ClientCreateRequest
@@ -1606,7 +1705,7 @@ export interface components {
             /** Id */
             id: number;
             /** Account Id */
-            account_id: number;
+            account_id: number | null;
             /** Kind */
             kind: string;
             /** Status */
@@ -1815,6 +1914,29 @@ export interface components {
             /** Days With Data */
             days_with_data: number | null;
         };
+        /**
+         * ProductItem
+         * @description 一个商品。
+         */
+        ProductItem: {
+            /** Id */
+            id: number;
+            /** Client Id */
+            client_id: number;
+            /** Sku */
+            sku: string;
+            /** Name */
+            name: string | null;
+            /** Is Active */
+            is_active: boolean;
+        };
+        /** ProductListResponse */
+        ProductListResponse: {
+            /** Items */
+            items: components["schemas"]["ProductItem"][];
+            /** Total */
+            total: number;
+        };
         /** ReadinessResponse */
         ReadinessResponse: {
             /**
@@ -1981,12 +2103,79 @@ export interface components {
          */
         ReportStatus: "draft" | "pending_review" | "published";
         /**
+         * StockImportResponse
+         * @description 一次库存导入的结果。
+         */
+        StockImportResponse: {
+            /** Client Id */
+            client_id: number;
+            /**
+             * Captured At
+             * Format: date-time
+             */
+            captured_at: string;
+            /** Products Created */
+            products_created: number;
+            /** Products Updated */
+            products_updated: number;
+            /** Snapshots */
+            snapshots: number;
+            /** Skipped Rows */
+            skipped_rows: number;
+            /** With Sales Column */
+            with_sales_column: number;
+        };
+        /** StockRunwayListResponse */
+        StockRunwayListResponse: {
+            /** Items */
+            items: components["schemas"]["StockRunwayResponse"][];
+            /** Total */
+            total: number;
+        };
+        /**
+         * StockRunwayResponse
+         * @description 一个商品的库存还能撑多久。
+         */
+        StockRunwayResponse: {
+            /** Product Id */
+            product_id: number;
+            /** Client Id */
+            client_id: number;
+            /** Client Name */
+            client_name: string;
+            /** Sku */
+            sku: string;
+            /** Name */
+            name: string | null;
+            /** Stock Qty */
+            stock_qty: string;
+            /** Avg Daily Sales */
+            avg_daily_sales: string | null;
+            /** Days Left */
+            days_left: string | null;
+            /** Is Alerting */
+            is_alerting: boolean;
+            /** Threshold Days */
+            threshold_days: string;
+            /** Sales Source */
+            sales_source: string;
+            /**
+             * Captured At
+             * Format: date-time
+             */
+            captured_at: string;
+            /** Snapshot Count */
+            snapshot_count: number;
+        };
+        /**
          * SweepResponse
          * @description 一轮巡检的结果。数字都是**告警条数**，不是账户数。
          */
         SweepResponse: {
             /** Accounts */
             accounts: number;
+            /** Clients */
+            clients: number;
             /** Opened */
             opened: number;
             /** Still Open */
@@ -3410,6 +3599,174 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BalanceRunwayResponse"] | null;
+                };
+            };
+            /** @description 没带 token、token 无效或已过期 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    importStock: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                client_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_importStock"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StockImportResponse"];
+                };
+            };
+            /** @description 没带 token、token 无效或已过期 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 上传的文件超过大小上限 */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 入参不合法，或引用了不存在的对象 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    listProducts: {
+        parameters: {
+            query?: {
+                /** @description 页码，从 1 起 */
+                page?: number;
+                /** @description 每页条数，上限 100 */
+                page_size?: number;
+                is_active?: boolean | null;
+            };
+            header?: never;
+            path: {
+                client_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProductListResponse"];
+                };
+            };
+            /** @description 没带 token、token 无效或已过期 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    listStockRunway: {
+        parameters: {
+            query?: {
+                only_alerting?: boolean;
+            };
+            header?: never;
+            path: {
+                client_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StockRunwayListResponse"];
                 };
             };
             /** @description 没带 token、token 无效或已过期 */

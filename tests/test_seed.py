@@ -13,7 +13,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -23,10 +23,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from adpilot import seed
 from adpilot.config import Environment, Settings
+from adpilot.models.ad_account import AdAccount
 from adpilot.models.llm_call import LLMCall
 from adpilot.models.report import Report, ReportStatus
 from adpilot.rules import anomaly as anomaly_rules
 from adpilot.rules import balance as balance_rules
+from adpilot.rules import stock as stock_rules
 from adpilot.services import invite as invite_service
 
 # 计划里那四个账户，按它们各自要演示的规则结局取名。
@@ -37,10 +39,41 @@ PAUSED = "demo-tiktok-0002"
 
 _NUMERIC_COLUMNS = ("spend", "impressions", "clicks", "conversions", "revenue", "reach")
 
+#: 库存快照序列的锚点。取哪个时刻不影响结论（规则看的是**两点之间的跨度**），
+#: 所以写死一个而不是跟着 `now()` 走 —— 后者会让失败信息里的数字每天都不一样。
+_LATEST_AT = datetime(2026, 8, 20, 9, 0, tzinfo=UTC)
+
 
 def _accounts() -> Iterator[seed._Account]:
     for client in seed._PLAN:
         yield from client.accounts
+
+
+def _products() -> Iterator[seed._Product]:
+    for client in seed._PLAN:
+        yield from client.products
+
+
+def _stock_runway(plan: seed._Product) -> stock_rules.StockRunway:
+    """把 seed 造的库存快照喂进真实的库存规则。
+
+    **走的是和 `services/product.py` 一样的两条路**（文件自带的日均优先，没有就
+    从快照序列推），所以这里的结论和实跑一次巡检得到的是同一个 —— 复制一份简化
+    的判定逻辑进来，就等于让这条测试测它自己。
+    """
+    points = [stock_rules.StockPoint(captured_at=_LATEST_AT, qty=plan.qty)]
+    if plan.previous_qty is not None:
+        points.append(
+            stock_rules.StockPoint(
+                captured_at=_LATEST_AT - timedelta(days=plan.previous_days_ago),
+                qty=plan.previous_qty,
+            )
+        )
+
+    avg = plan.daily_sales
+    if avg is None:
+        avg = stock_rules.infer_daily_sales(points)
+    return stock_rules.runway(plan.qty, avg)
 
 
 def _account(external_id: str) -> seed._Account:
@@ -146,6 +179,10 @@ def test_identifiers_are_obviously_fake() -> None:
             assert account.external_id.startswith("demo-"), account.external_id
             for campaign in account.campaigns:
                 assert campaign.external_id.startswith("demo-"), campaign.external_id
+        for product in client.products:
+            # SKU 会在客户端和后台两处显示出来，真实商品编码同样不该进公开仓库。
+            assert product.sku.startswith("demo-"), product.sku
+            assert product.name.startswith("（示例）"), product.name
 
 
 # --- 规则结局对不对 -----------------------------------------------------------
@@ -223,11 +260,12 @@ def test_steady_accounts_have_no_anomaly(external_id: str) -> None:
         assert verdict is None or not verdict.is_anomalous, f"{external_id} 的 {metric} 异动了"
 
 
-def test_plan_produces_exactly_two_alerting_accounts() -> None:
-    """整批数据跑完规则，恰好两条告警 —— `seed.py` 的 docstring 就是这么承诺的。
+def test_plan_produces_exactly_three_alerts() -> None:
+    """整批数据跑完规则，恰好三条告警 —— `seed.py` 的 docstring 就是这么承诺的。
 
-    单独测每个账户还不够：这条守的是**总数**。加一个新的示例账户时，如果它顺带
-    触发了什么，这里会红，逼着人回去把那份 docstring 里的表格一起改掉。
+    单独测每个账户/商品还不够：这条守的是**总数**。加一个新的示例对象时，如果它
+    顺带触发了什么，这里会红，逼着人回去把那份 docstring 里的表格、README 里的
+    数字和命令行回执一起改掉 —— 那个数字写在四个地方，而这是唯一会拦住人的一个。
     """
     alerting = 0
     for plan in _accounts():
@@ -241,7 +279,34 @@ def test_plan_produces_exactly_two_alerting_accounts() -> None:
             if verdict is not None and verdict.is_anomalous:
                 alerting += 1
 
-    assert alerting == 2
+    for product in _products():
+        if _stock_runway(product).is_alerting:
+            alerting += 1
+
+    assert alerting == 3
+
+
+def test_the_stock_products_cover_all_three_sales_sources() -> None:
+    """🔴 三个示例商品必须各演示一种日均来源，一个都不能少。
+
+    `sales_source` 这个字段在界面上决定显示哪句提示（「来自店铺导出」/「按库存
+    变化推算」/「再导一次就能算了」），而只有三种值都出现过，那几句提示才有人
+    看得到。少一种的症状是「某个分支的文案从没被人看过」，而那种文案最容易写错。
+    """
+    verdicts = {product.sku: _stock_runway(product) for product in _products()}
+
+    from_file = verdicts["demo-sku-0001"]
+    assert from_file.avg_daily_sales == Decimal(6), "这个款的日均该直接来自导出文件"
+    assert from_file.is_alerting
+
+    inferred = verdicts["demo-sku-0002"]
+    assert inferred.avg_daily_sales is not None, "两条快照就该推得出日均"
+    assert not inferred.is_alerting
+
+    unknown = verdicts["demo-sku-0003"]
+    assert unknown.avg_daily_sales is None, "只有一条快照时日均必须是「算不出来」"
+    assert unknown.days_left is None
+    assert not unknown.is_alerting, "算不出来 ≠ 已断货"
 
 
 # --- 护栏 ---------------------------------------------------------------------
@@ -339,14 +404,31 @@ async def test_seed_publishes_a_demo_report_without_ever_calling_the_model(
 
     assert calls_after == calls_before, "seed 调用了 LLM —— 灌示例数据不该花钱"
 
-    reports = (await live_session.scalars(select(Report))).all()
-    assert len(reports) == sum(len(client.accounts) for client in seed._PLAN)
+    # 🔴 按计划逐个账户去找，**不数全表**。数全表要求库是空的，而 seed 恰恰是
+    # 「只添不改、重复跑安全」的 —— 在一个跑过几天 seed 的开发库上，全表里还躺着
+    # 前几天那几份日报，于是这条断言在第二天就红，而红的原因跟被测的行为无关。
+    for client_plan in seed._PLAN:
+        for account_plan in client_plan.accounts:
+            account = await live_session.scalar(
+                select(AdAccount).where(AdAccount.external_id == account_plan.external_id)
+            )
+            assert account is not None, f"seed 没建出账户：{account_plan.external_id}"
+            report = await live_session.scalar(
+                select(Report).where(
+                    Report.account_id == account.id,
+                    Report.stat_date == seed._yesterday(account_plan.timezone),
+                )
+            )
+            assert report is not None, f"{account_plan.external_id} 昨天那份日报没发出来"
+            _assert_demo_report(report)
 
-    for report in reports:
-        assert report.status is ReportStatus.PUBLISHED
-        # 人话是示例文案，**不是模型写的** —— 没调模型，原文自然是空的
-        assert report.narrative is not None
-        assert report.llm_narrative is None
-        assert report.llm_call_id is None
-        # 发布校验之一：本期做了什么不能是空的
-        assert report.actions_snapshot, "日报里没有操作记录，它本不该发得出去"
+
+def _assert_demo_report(report: Report) -> None:
+    """一份 seed 造出来的日报该长什么样。"""
+    assert report.status is ReportStatus.PUBLISHED
+    # 人话是示例文案，**不是模型写的** —— 没调模型，原文自然是空的
+    assert report.narrative is not None
+    assert report.llm_narrative is None
+    assert report.llm_call_id is None
+    # 发布校验之一：本期做了什么不能是空的
+    assert report.actions_snapshot, "日报里没有操作记录，它本不该发得出去"

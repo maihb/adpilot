@@ -12,12 +12,12 @@
 
 ## 领域
 
-> **D14 完成，MVP 的功能范围到此走完**：整条链现在是 客户与账户 → 文件导入 →
+> **D16 完成，MVP 的功能范围全部走完**：整条链现在是 客户与账户 → 文件导入 →
 > Mongo 原始快照 →（RabbitMQ）→ 归一化 upsert → 按天查询 →（每小时 beat）→ 规则
 > 巡检 → 告警状态机 → webhook → **日报**（数字由代码算、人话由 LLM 起草、人改完
 > 才能发）→ 客户端只看得到已发布的那份，外面套着一层认证，前面摆着两个前端。
-> **剩下的是 D15**：文档、截图、部署。⚠️ 还欠着库存断货那条规则（它需要一个
-> 全新的数据域）；两处日报界面（客户端看的那屏、运营改和发的那屏）都已补上。下表是
+> **D15**（文档、截图、部署）与 **D16**（库存断货，规则引擎最后一条）都已落地 ——
+> 后者顺带把 `alerts` 改成了两级：告警现在分**账户级**和**客户级**两种。下表是
 > [设计文档第六、七节](../design/2026-08-19-mvp-design.md)定下的范围，落一个
 > 勾一个。**「状态」这一列不许提前打勾** —— 一张说自己有东西但其实没有的表，
 > 比没有这张表更糟。
@@ -28,17 +28,18 @@
 
 | 领域 | tag | 覆盖什么 | 代码 | 状态 |
 |---|---|---|---|---|
-| [glossary](glossary.md) | — | 术语、指标口径、时区、回填与重述、规则公式 | `rules/` | ✅ 口径已定；余额那两个参数已按倾向值实现，仍待业务定论 |
+| [glossary](glossary.md) | — | 术语、指标口径、时区、回填与重述、规则公式 | `rules/` | ✅ 口径已定；余额、异动、库存三组参数都已按倾向值实现，仍待业务定论 |
 | [认证与作用域](auth.md) | `auth` | 两种身份、token 的签发与校验、运营登录、有效期与续期 | `auth/` `api/auth.py` `api/deps.py` | ✅ D9：内部接口已全部要认证；客户端那半边随 `portal` 一起 |
 | [客户自助端](portal.md) | `portal` | 客户看自己：账户、时间线、余额可撑天数、告警。**全只读，作用域锁死** | `api/portal.py` `schemas/portal.py` `services/*_for_client` | ✅ D9：接口已通；uni-app 前端 D10–D11 |
-| [内部操作台](admin.md) | — | 运营的六屏、写操作的三级分类、邀请码只显示一次、导入的两段 | `admin/src/` | ✅ D12 五屏 + D14 日报屏（生成 / 修订 / 发布，发布要二次确认）|
+| [内部操作台](admin.md) | — | 运营的七屏、写操作的三级分类、邀请码只显示一次、导入的两段 | `admin/src/` | ✅ D12 五屏 + D14 日报屏（发布要二次确认）+ D16 库存屏 |
 | [客户端界面](client-app.md) | — | 客户在手机上看到的五屏、以及「显示错了不会报错」的四条口径规则 | `client/src/` | ✅ D10–D11 四屏 + D14 日报屏：H5 已跑通；微信小程序端只验到编译通过 |
 | [客户与账户](clients.md) | `clients` | 客户、广告账户（平台/币种/**时区**）、账户与客户的归属 | `client.py` `ad_account.py`（model / schema / service / api 四层同名） | ✅ D3：建、查、改与分页已落地，无删除 |
 | [数据接入](imports.md) | `imports` | `ReportProvider` 适配器注册表、文件导入、原始快照落盘 | `providers/` `services/imports.py` | ✅ D3：CSV 导入与 append-only 落盘已通，Excel 与拉取调度未做 |
 | [日指标](metrics.md) | `metrics` | 平台字段 → 统一口径、唯一键 upsert、按天查询与派生指标 | `services/field_maps.py` `services/normalize.py` `services/daily_metric.py` | ✅ D3–D5：归一化与按天查询已通；聚合与环比未做 |
 | [异步任务](tasks.md) | `tasks` | Celery + RabbitMQ、重试与死信队列、任务状态查询、定时排期 | `db/broker.py` `tasks/` `services/task.py` | ✅ D6：归一化已异步化；D8：告警巡检已进 `beat_schedule`（**要另起一个 beat 进程**） |
 | [余额与账户](balances.md) | `balances` | 余额快照录入、可撑天数 | `rules/balance.py` `services/balance.py` | ✅ D7 |
-| [告警与巡检](alerts.md) | `alerts` | 状态机去重、定时巡检、指标异动、webhook 推送 | `rules/anomaly.py` `services/alert.py` `tasks/alerts.py` `notifiers/` | ✅ D8：巡检自动跑、同一件事只报一次；库存断货未做 |
+| [库存与断货](stock.md) | `products` | 库存表导入、可撑天数、**日均销量的两个来源**。告警是**客户级**的 | `rules/stock.py` `providers/stock_csv.py` `services/product.py` | ✅ D16：整条链已通；商品与广告系列的映射明确不做 |
+| [告警与巡检](alerts.md) | `alerts` | 状态机去重、定时巡检、指标异动、webhook 推送 | `rules/anomaly.py` `services/alert.py` `tasks/alerts.py` `notifiers/` | ✅ D8：巡检自动跑、同一件事只报一次；D16 加了客户级那一层 |
 | [操作记录](actions.md) | `actions` | 「本期做了什么」的唯一数据来源，**`reason` 必填** —— 平台变更日志补得上「改了什么」，补不上「为什么」 | `models/action.py` `services/action.py` `api/action.py` | ✅ D13：登记与查询已通；自动抓平台变更日志未做，[发布前校验非空](../design/2026-08-19-mvp-design.md#4-投放操作记录mvp-手动登记必填)随日报走 |
 | [日报](reports.md) | `reports` | 生成 → 人工修订 → 发布，**快照固定**、两版人话都存、两条硬校验 | `models/report.py` `services/report.py` `api/report.py` | ✅ D14：整条链已通，客户端只看得到已发布的；编辑界面与定时生成未做 |
 | [LLM](llm.md) | — | 适配器、输出契约（**没有数字字段**）、提示词版本、调用成本与每日闸门 | `llm/` `services/llm.py` `models/llm_call.py` | ✅ D13–D14：日报撰写与按需诊断都在用它；RAG 不做 |

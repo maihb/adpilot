@@ -22,7 +22,7 @@
 | 扫码 / 输码 | `redeemInvite` | 唯一入口。H5 靠链接带码，小程序多一个扫一扫 |
 | 看板（首页） | `getPortalProfile` + `listPortalAccounts` + 每账户 `getPortalRunway` | 「我有哪些号、哪个号快没钱了」 |
 | 账户明细 | `listPortalMetrics` | 每日时间线，默认近 14 天 |
-| 告警 | `listPortalAlerts` | 默认只给未解决的 |
+| 告警 | `listPortalAlerts` | 默认只给未解决的。**库存断货那条没有账户**（`account_id` 为 null）—— 它是客户级的 |
 | 日报 | `listPortalReports` + `getPortalReport` | **客户真正等着看的东西**：那一行人话 + 本期做了什么。只看得到已发布的（D14） |
 | 我的 | 无 | 口径说明 + 退出。**不是凑数的**：时区、归因差异、数据更新时机这三句话得有个地方放 |
 

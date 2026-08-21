@@ -55,6 +55,7 @@ function toggle(): void {
 const KIND_NAMES: Record<string, string> = {
   balance_low: '余额',
   metric_anomaly: '指标异动',
+  stock_low: '库存',
 }
 
 function kindName(kind: string): string {

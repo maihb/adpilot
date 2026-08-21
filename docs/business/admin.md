@@ -1,9 +1,9 @@
 # 内部操作台
 
-**代码**：`admin/src/pages/`（五屏）· `admin/src/api/request.ts`（唯一请求出口）·
+**代码**：`admin/src/pages/`（七屏）· `admin/src/api/request.ts`（唯一请求出口）·
 `admin/src/utils/format.ts`（口径怎么显示）· `tests/test_frontend_source.py`（形状门禁）
 
-**范围出处**：[内部后台设计](../design/2026-08-21-admin-console.md) · 里程碑 D12
+**范围出处**：[内部后台设计](../design/2026-08-21-admin-console.md) · 里程碑 D12（日报屏 D14、库存屏 D16）
 
 **OpenAPI tag**：无。它消费的是内部那八组接口，自己不提供接口。
 
@@ -14,11 +14,12 @@
 **不负责**：任何判断（在 `rules/`）、任何解释（那是 [LLM 层](llm.md)）—— 日报里
 那段人话由模型起草，运营在这里**改完才发得出去**，见 [日报](reports.md)。
 
-## 六屏，按运营真实的一天排
+## 七屏，按运营真实的一天排
 
 | 屏 | 什么时候用 | 主要接口 |
 |---|---|---|
 | **导入**（首页） | 每天，最高频 | `importReportFile` → `getTaskStatus` |
+| **库存** | 隔几天一次，跟着店铺导出的节奏 | `importStock` · `listStockRunway` |
 | **告警** | 每天，第二高频 | `listAlerts` · `sweepAlerts` |
 | **日报** | 每天，出完告警之后 | `generateReport` · `reviseReport` · `publishReport` |
 | 客户列表 / 新建 | 新客户上手时 | `listClients` · `createClient` |
@@ -35,7 +36,7 @@
 
 | 级别 | 例子 | 怎么做 |
 |---|---|---|
-| 可逆 | 建客户、录余额、重跑归一化 | 直接做 |
+| 可逆 | 建客户、录余额、重跑归一化、**导库存** | 直接做。库存导入之所以在这一级而不是「难逆」那一级：重传同一个时刻是**覆盖**，导错了再导一次即可（报表导入不是，`raw_reports` append-only）|
 | 难逆 | 导入一份报表 | 直接做，但**导完必须显示导进去了什么** —— `raw_reports` append-only，导错了删不掉，只能靠归一化重跑盖过去 |
 | **不可逆 / 立刻影响外部人** | **停用客户**、**作废邀请码**、**发布日报** | 二次确认，且确认文案里写出后果 |
 

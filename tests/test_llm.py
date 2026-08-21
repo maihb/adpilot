@@ -430,6 +430,9 @@ async def _seed_alert(session: AsyncSession, suffix: str) -> Alert:
 
     now = datetime.now(UTC)
     alert = Alert(
+        # D16 起 client_id 必填：告警分账户级和客户级两层，而客户级那半边
+        # （库存断货）的 account_id 是 NULL，作用域过滤只能靠 client_id。
+        client_id=client.id,
         account_id=account.id,
         kind=AlertKind.METRIC_ANOMALY.value,
         status=AlertStatus.OPEN.value,

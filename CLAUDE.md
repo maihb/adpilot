@@ -37,6 +37,7 @@
 | **调 LLM / 加提示词 / 查调用成本**（三条硬边界各被什么拦着） | [`docs/business/llm.md`](docs/business/llm.md) |
 | **加一个后台任务**（重试与死信怎么分流、worker 里的两个致命坑） | [`docs/business/tasks.md`](docs/business/tasks.md) |
 | **加一条规则或告警**（状态机怎么去重、通知怎么不重复打扰） | [`docs/business/alerts.md`](docs/business/alerts.md) |
+| **改库存 / 断货预警**（日均销量的两个来源、告警为什么是客户级的） | [`docs/business/stock.md`](docs/business/stock.md) |
 | **指标口径、时区、数据回填、告警公式** | [`docs/business/glossary.md`](docs/business/glossary.md) |
 | 某个业务领域现在做到哪、规则是什么 | [`docs/business/BUSINESS.md`](docs/business/BUSINESS.md) |
 | 为什么同时用 PostgreSQL 和 MongoDB | `src/adpilot/db/mongo.py` 模块 docstring |
@@ -92,8 +93,9 @@
 | **celery 只放 worker / beat 子命令** | `settings.json` 里逐条列出，不是 `uv run celery:*` —— 同一个 CLI 底下还有 `purge`（清空队列）和 `control`（远程指挥 worker） |
 | **worker / beat 的启动参数不许被删** | `tests/test_tasks.py` 同时盯着 Makefile 和 compose：`--without-mingle` / `--without-gossip`（少了 RabbitMQ 4 上起不来）、`-Q adpilot`（少了一条消息都不处理）、以及「有没有 beat 的启动方式」 |
 | **不监听端口的服务要显式关掉 healthcheck** | 同上那个文件。`HEALTHCHECK` 在 Dockerfile 里是**镜像级**的，三个进程共用一个镜像 —— worker / beat 不禁用就永远 unhealthy，而一个恒为红的健康灯会让人对整列输出脱敏 |
-| **示例数据一眼看得出是假的** | `tests/test_seed.py`：客户名要 `示例｜` 前缀、账户与系列 ID 要 `demo-` 前缀。同一个文件还盯着「跑完恰好两条告警」—— 那个数字写在 README 里 |
+| **示例数据一眼看得出是假的** | `tests/test_seed.py`：客户名要 `示例｜` 前缀，账户、系列与 SKU 要 `demo-` 前缀。同一个文件还盯着「跑完恰好三条告警」—— 那个数字写在**四个**地方（README、seed 的 docstring、seed 的命令行回执、这条测试），而只有测试会拦住改漏的人 |
 | **迁移不悄悄删数据** | `tests/test_migration_safety.py`：`upgrade()` 里出现删表/删列，就必须在文件里写一行 `# DESTRUCTIVE-OK: <理由>`。只扫 `upgrade()` —— `downgrade()` 里的 drop 是回滚，每个建表迁移都有 |
+| **告警去重不被 NULL 绕过** | `tests/test_products_api.py` 那条「巡检三次只开一条」。`alerts` 有**两个**部分唯一索引，因为库存断货是客户级的（`account_id IS NULL`）而 **PostgreSQL 的唯一索引里 NULL 不等于 NULL** —— 少了第二个索引不会报错，只会每小时多一条一模一样的告警 |
 | **改了 model 别忘了生成迁移** | `alembic check` 跑在 CI 的集成 job 里（要连真实库） |
 | **分层依赖不许倒流** | `lint-imports`（import-linter）跑在 CI 里，契约就是 [`architecture.md`](docs/code-rules/architecture.md#分层与依赖方向) 那张图，配置在 `pyproject.toml`。`exhaustive` 开着 —— 新增顶层模块必须先在分层图里占个位置，不能先建了再说 |
 | **加了接口别忘了业务文档** | `tests/test_business_docs.py`：OpenAPI 里的每个 tag 都要在 [`BUSINESS.md`](docs/business/BUSINESS.md) 的索引表里登记，**双向都查**（登记了却没接口也红），外加一条死链检查 |
@@ -171,9 +173,9 @@ uv run pytest                                    # 单元测试，不需要外�
 RUN_INTEGRATION=1 uv run pytest -m integration   # 需要 compose 那套环境 + 先迁移
 
 # 脱敏示例数据。只添不改（重复跑安全），ENVIRONMENT=prod 时拒绝执行且**没有
-# --force**。四个示例账户各演示一种规则结局，跑完巡检应当恰好两条告警 ——
-# 那个数字有测试盯着（tests/test_seed.py）。还会给每个账户造一条操作记录和一份
-# **已发布的昨日日报**（走真链路，顺带验着那两条发布校验）。
+# --force**。四个示例账户 + 三个示例商品各演示一种规则结局，跑完巡检应当恰好
+# 三条告警 —— 那个数字有测试盯着（tests/test_seed.py）。还会给每个账户造一条操作
+# 记录和一份**已发布的昨日日报**（走真链路，顺带验着那两条发布校验）。
 # 🔴 seed **绝不调用 LLM**，哪怕配了 LLM_BASE_URL —— 灌示例数据不该花钱，
 # 那份日报里的人话是写死的示例文案。同样有测试盯着。
 uv run python -m adpilot.seed

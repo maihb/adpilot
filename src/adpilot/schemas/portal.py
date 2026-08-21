@@ -129,7 +129,14 @@ class PortalAlertItem(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
-    account_id: int
+
+    #: 指向哪个投放账户。**`null` 表示这是客户级告警**（`stock_low`：商品挂在
+    #: 客户上，同一批货可能被多个账户在推）。客户端那一屏据此决定要不要显示账户名。
+    #:
+    #: **不带 `client_id`** —— 客户端只看得到自己的告警，那个字段对它恒等于
+    #: 「我自己」，回出去只是噪音（同这个文件里去掉 `notified_at` 的理由）。
+    account_id: int | None
+
     kind: str
     status: str
     subject: str

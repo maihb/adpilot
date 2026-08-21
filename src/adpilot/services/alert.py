@@ -40,6 +40,7 @@ from adpilot.llm import prompts
 from adpilot.llm.base import LLMProvider
 from adpilot.models.ad_account import AdAccount
 from adpilot.models.alert import Alert, AlertKind, AlertStatus
+from adpilot.models.client import Client
 from adpilot.models.llm_call import LLMCall
 from adpilot.notifiers import webhook
 from adpilot.rules import anomaly as anomaly_rules
@@ -48,12 +49,17 @@ from adpilot.services import ad_account as ad_account_service
 from adpilot.services import balance as balance_service
 from adpilot.services import daily_metric as daily_metric_service
 from adpilot.services import llm as llm_service
+from adpilot.services import product as product_service
 from adpilot.services.exceptions import NotFoundError
 
 log = structlog.get_logger(__name__)
 
 #: 余额告警在一个账户里只有一件事，`subject` 是个常量。
 BALANCE_SUBJECT = "balance"
+
+#: 库存告警每个商品一件事，`subject` 带上 SKU。没有它，同一个客户的两个断货商品
+#: 会互相顶掉 —— 部分唯一索引认的是 (客户, 种类, subject)。
+STOCK_SUBJECT_PREFIX = "stock:"
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,9 +74,14 @@ class Finding:
 
 @dataclass(frozen=True, slots=True)
 class SweepSummary:
-    """一轮巡检的结果。数字都是**告警条数**，不是账户数。"""
+    """一轮巡检的结果。`opened` 那几个数字都是**告警条数**，不是账户数。"""
 
     accounts: int
+
+    #: 这一轮看了几个客户的库存。**不等于客户总数** —— 一个在投账户都没有的客户
+    #: 整个跳过（`services/product.py` 的 `alerts` 讲了为什么）。
+    clients: int
+
     opened: int
     still_open: int
     resolved: int
@@ -86,6 +97,13 @@ async def sweep(session: AsyncSession, settings: Settings) -> SweepSummary:
     停投的账户（`is_active=false`）不看，理由同余额清单：它们混在告警里只会让人
     学会忽略这个列表。已经开着的告警**不会**因为账户停投而自动 resolve —— 那需要
     一次显式的巡检确认问题不在了，而不是靠「看不见了」。
+
+    ### 两趟，因为告警有两个层级
+
+    余额和指标异动挂在**账户**上，库存断货挂在**客户**上（商品是店铺的属性，
+    一个客户的多个投放账户推的是同一批货）。所以对账要分两趟走，各自按自己的
+    去重键 —— 混成一趟的话，库存那条要么被账户数放大成 N 条，要么因为
+    `NULL != NULL` 而每轮新开一条（`models/alert.py` 的类 docstring）。
     """
     accounts = (await session.scalars(select(AdAccount).where(AdAccount.is_active.is_(True)))).all()
 
@@ -98,6 +116,7 @@ async def sweep(session: AsyncSession, settings: Settings) -> SweepSummary:
         findings = await _findings_for(session, account)
         account_opened, account_still, account_resolved = await _reconcile(
             session,
+            client_id=account.client_id,
             account_id=account.id,
             findings=findings,
             now=now,
@@ -105,6 +124,27 @@ async def sweep(session: AsyncSession, settings: Settings) -> SweepSummary:
         opened.extend(account_opened)
         still_open += account_still
         resolved += account_resolved
+
+    stock_alerts = await product_service.alerts(session, only_alerting=True)
+    by_client: dict[int, list[Finding]] = {}
+    for item in stock_alerts:
+        by_client.setdefault(item.client_id, []).append(_stock_finding(item))
+
+    # 🔴 遍历的是**被巡检过的客户**，不是有断货商品的客户。少了这一步，一个客户
+    # 的库存补上之后那条告警永远不会被 resolve —— 它不再出现在 findings 里，而
+    # 「不再出现」恰恰是对账要看见的东西。
+    swept_clients = {account.client_id for account in accounts}
+    for client_id in sorted(swept_clients):
+        client_opened, client_still, client_resolved = await _reconcile(
+            session,
+            client_id=client_id,
+            account_id=None,
+            findings=by_client.get(client_id, []),
+            now=now,
+        )
+        opened.extend(client_opened)
+        still_open += client_still
+        resolved += client_resolved
 
     # 先把行写进去再推送：推送失败时告警**已经在库里了**，人打开清单还是看得到，
     # 而 notified_at 留空意味着下一轮会再试一次。反过来（先推后写）则是推成功了
@@ -114,6 +154,7 @@ async def sweep(session: AsyncSession, settings: Settings) -> SweepSummary:
 
     summary = SweepSummary(
         accounts=len(accounts),
+        clients=len(swept_clients),
         opened=len(opened),
         still_open=still_open,
         resolved=resolved,
@@ -122,6 +163,7 @@ async def sweep(session: AsyncSession, settings: Settings) -> SweepSummary:
     log.info(
         "alert_sweep_finished",
         accounts=summary.accounts,
+        clients=summary.clients,
         opened=summary.opened,
         still_open=summary.still_open,
         resolved=summary.resolved,
@@ -174,26 +216,25 @@ async def list_for_client(
 ) -> tuple[Sequence[Alert], int]:
     """客户端那条路径上的告警清单。`client_id` 必填，不给根本调不通。
 
-    过滤靠一次 JOIN 回 `ad_accounts`：告警挂在账户上，账户挂在客户上。**不接受
-    `account_id` 入参** —— 客户要的是「我这边有什么要注意的」，而按账户筛这件事
-    会多出一个需要校验归属的入口，收益却只是少几行。
+    过滤是 `alerts.client_id` 上的一个等值条件。**D16 之前这里是一次 JOIN 回
+    `ad_accounts`**，改掉是因为库存告警的 `account_id` 是 NULL（客户级），
+    内连接会把它整个筛掉 —— 客户于是永远看不到自己的断货告警，而且不会有任何
+    报错。少一次 JOIN 顺带也少一个能漏掉作用域的地方（CLAUDE.md 硬规矩 4）。
+
+    **不接受 `account_id` 入参** —— 客户要的是「我这边有什么要注意的」，而按账户
+    筛这件事会多出一个需要校验归属的入口，收益却只是少几行。
 
     默认只给未解决的：客户看的是当下，不是台账。历史（含已解决）要显式要。
     """
-    filters = [AdAccount.client_id == client_id]
+    filters = [Alert.client_id == client_id]
     if only_open:
         filters.append(Alert.status == AlertStatus.OPEN.value)
 
-    scoped = select(Alert).join(AdAccount, Alert.account_id == AdAccount.id).where(*filters)
-
-    total = await session.scalar(
-        select(func.count())
-        .select_from(Alert)
-        .join(AdAccount, Alert.account_id == AdAccount.id)
-        .where(*filters)
-    )
+    total = await session.scalar(select(func.count(Alert.id)).where(*filters))
     rows = await session.scalars(
-        scoped.order_by(
+        select(Alert)
+        .where(*filters)
+        .order_by(
             case((Alert.status == AlertStatus.OPEN.value, 0), else_=1),
             Alert.opened_at.desc(),
             Alert.id.desc(),
@@ -241,6 +282,40 @@ async def _balance_finding(session: AsyncSession, account: AdAccount) -> Finding
             "lookback_from": alert.lookback_from.isoformat(),
             "lookback_to": alert.lookback_to.isoformat(),
             "days_with_data": alert.days_with_data,
+        },
+    )
+
+
+def _stock_finding(item: product_service.StockAlert) -> Finding:
+    """把一个商品的断货判定拼成一条告警。
+
+    人话摘要里**带上日均是怎么来的**：推算出来的日均建立在「中间没补过货」这个
+    假设上，而人看到「还能撑 2 天」时第一个该问的就是这个数可信不可信。把它藏进
+    `detail` 等于没写 —— 推送到群里的只有 `message` 这一行。
+    """
+    days_left = item.runway.days_left
+    label = item.name or item.sku
+    source = (
+        "店铺导出" if item.sales_source == product_service.SALES_FROM_FILE else "按库存变化推算"
+    )
+    return Finding(
+        kind=AlertKind.STOCK_LOW,
+        subject=f"{STOCK_SUBJECT_PREFIX}{item.sku}",
+        message=(
+            f"{label}（{item.sku}）库存只够撑 {days_left} 天"
+            f"（还剩 {item.runway.stock_qty}，日均销量 {item.runway.avg_daily_sales}，{source}）"
+        ),
+        detail={
+            "days_left": _plain(days_left),
+            "stock_qty": _plain(item.runway.stock_qty),
+            "avg_daily_sales": _plain(item.runway.avg_daily_sales),
+            "threshold_days": _plain(item.runway.threshold_days),
+            "sku": item.sku,
+            "product_name": item.name,
+            "product_id": item.product_id,
+            "sales_source": item.sales_source,
+            "captured_at": item.captured_at.isoformat(),
+            "snapshot_count": item.snapshot_count,
         },
     )
 
@@ -311,15 +386,24 @@ async def _anomaly_findings(session: AsyncSession, account: AdAccount) -> list[F
 async def _reconcile(
     session: AsyncSession,
     *,
-    account_id: int,
+    client_id: int,
+    account_id: int | None,
     findings: Sequence[Finding],
     now: datetime,
 ) -> tuple[list[Alert], int, int]:
-    """把一个账户的判定对账进表，返回 (新开的, 仍然开着的, 刚解决的)。"""
+    """把一组判定对账进表，返回 (新开的, 仍然开着的, 刚解决的)。
+
+    `account_id` 为 `None` 时对的是**客户级**那一批（目前只有库存断货）。两种
+    情况用的是两个不同的去重键，所以下面那句 `where` 的条件也不同 ——
+    `Alert.account_id == None` 在 SQLAlchemy 里会渲染成 `IS NULL`，但写成
+    `.is_(None)` 才不会被 lint 挑，也才读得出意图。
+    """
+    scope = Alert.account_id.is_(None) if account_id is None else Alert.account_id == account_id
     open_rows = (
         await session.scalars(
             select(Alert).where(
-                Alert.account_id == account_id,
+                Alert.client_id == client_id,
+                scope,
                 Alert.status == AlertStatus.OPEN.value,
             )
         )
@@ -332,6 +416,7 @@ async def _reconcile(
         existing = by_key.pop((finding.kind.value, finding.subject), None)
         if existing is None:
             alert = Alert(
+                client_id=client_id,
                 account_id=account_id,
                 kind=finding.kind.value,
                 status=AlertStatus.OPEN.value,
@@ -454,21 +539,38 @@ async def diagnose(
     if alert is None:
         raise NotFoundError(f"告警不存在：{alert_id}")
 
-    account = await ad_account_service.get(session, alert.account_id)
-    end = _yesterday(account)
-    actions = await action_service.list_in_window(
-        session,
-        account=account,
-        start=end - timedelta(days=DIAGNOSIS_LOOKBACK_DAYS - 1),
-        end=end,
+    # 🔴 客户级告警（库存断货）没有账户，于是也**不带操作记录**。
+    #
+    # 这不是省事：断货的原因在店铺那一侧（卖得比预期快、或者没按时补货），而操作
+    # 记录里全是投放动作（调预算、换素材）。把它们塞进去只会诱导模型把两件无关
+    # 的事说成因果 —— 而那种解释读起来最像真的。账户名这一格改用客户名，因为
+    # 提示词要的是「这是谁的事」。
+    account = (
+        None
+        if alert.account_id is None
+        else await ad_account_service.get(session, alert.account_id)
     )
+
+    actions: Sequence[Any] = []
+    if account is not None:
+        end = _yesterday(account)
+        actions = await action_service.list_in_window(
+            session,
+            account=account,
+            start=end - timedelta(days=DIAGNOSIS_LOOKBACK_DAYS - 1),
+            end=end,
+        )
+        subject_name = account.name
+    else:
+        client = await session.get(Client, alert.client_id)
+        subject_name = client.name if client is not None else f"客户 {alert.client_id}"
 
     outcome = await llm_service.run(
         session,
         settings,
         prompt=prompts.DIAGNOSIS,
         payload=llm_contracts.DiagnosisInput(
-            account_name=account.name,
+            account_name=subject_name,
             alert_kind=alert.kind,
             alert_message=alert.message,
             context=_diagnosis_context(alert),
@@ -482,7 +584,7 @@ async def diagnose(
             ],
         ),
         output_type=llm_contracts.Diagnosis,
-        account_id=account.id,
+        account_id=alert.account_id,
         provider=provider,
     )
 
@@ -490,6 +592,7 @@ async def diagnose(
         "alert_diagnosed",
         alert_id=alert_id,
         kind=alert.kind,
+        account_id=alert.account_id,
         answered=outcome.output is not None,
     )
     return DiagnosisOutcome(diagnosis=outcome.output, call=outcome.call)
@@ -516,6 +619,28 @@ def _diagnosis_context(alert: Alert) -> list[llm_contracts.MetricLine]:
             ),
             llm_contracts.MetricLine(
                 label="近期日均消耗", value=str(detail.get("avg_daily_spend"))
+            ),
+            llm_contracts.MetricLine(
+                label="告警阈值（天）", value=str(detail.get("threshold_days"))
+            ),
+        ]
+
+    if alert.kind == AlertKind.STOCK_LOW.value:
+        return [
+            llm_contracts.MetricLine(label="商品", value=f"{detail.get('product_name') or ''}"),
+            llm_contracts.MetricLine(label="商品编码", value=str(detail.get("sku"))),
+            llm_contracts.MetricLine(label="可撑天数", value=str(detail.get("days_left"))),
+            llm_contracts.MetricLine(label="剩余库存", value=str(detail.get("stock_qty"))),
+            llm_contracts.MetricLine(
+                label="日均销量",
+                value=str(detail.get("avg_daily_sales")),
+                # 🔴 这一行是给模型的**可信度提示**，不是装饰：推算出来的日均建立
+                # 在「中间没补过货」这个假设上，模型该知道它拿到的是哪一种。
+                change=(
+                    "来自店铺导出"
+                    if detail.get("sales_source") == product_service.SALES_FROM_FILE
+                    else "由库存变化推算，中间若补过货会偏高"
+                ),
             ),
             llm_contracts.MetricLine(
                 label="告警阈值（天）", value=str(detail.get("threshold_days"))

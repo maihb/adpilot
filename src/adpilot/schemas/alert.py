@@ -14,16 +14,23 @@ class AlertItem(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
-    account_id: int
 
-    #: `balance_low` / `metric_anomaly`
+    #: 这条告警属于哪个客户。账户级的从账户推导，客户级的（库存）本来就只有它。
+    client_id: int
+
+    #: 指向哪个投放账户。**`null` 表示这是客户级告警**（目前只有 `stock_low`：
+    #: 商品挂在客户上，同一批货可能被多个账户在推）。前端不要假设它一定有值。
+    account_id: int | None
+
+    #: `balance_low` / `metric_anomaly` / `stock_low`
     kind: str
 
     #: `open` / `resolved`
     status: str
 
-    #: 这条告警说的是账户里的哪件事：`balance`、`metric:spend`、`metric:cpa`。
-    #: 同一个 (账户, 种类, subject) 同时只会有一条 `open`。
+    #: 这条告警说的是哪件事：`balance`、`metric:spend`、`metric:cpa`、
+    #: `stock:<SKU>`。账户级的同一个 (账户, 种类, subject) 同时只会有一条 `open`，
+    #: 客户级的则是 (客户, 种类, subject)。
     subject: str
 
     #: 人话摘要，直接能贴进日报。**由规则算出来的事实，不是 LLM 写的解释。**
@@ -59,6 +66,11 @@ class SweepResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     accounts: int
+
+    #: 这一轮看了几个客户的库存。**不等于客户总数** —— 一个在投账户都没有的客户
+    #: 整个跳过：断货告警的意义是「广告还在跑，货没了」，广告没在跑时它只是一条
+    #: 店铺经营信息。
+    clients: int
 
     #: 这一轮新发现的
     opened: int

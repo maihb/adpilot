@@ -15,10 +15,18 @@ from adpilot.models.mixins import TimestampMixin
 
 
 class AlertKind(StrEnum):
-    """告警种类。存的是 varchar，加一个成员**不需要迁移**（见 `models/types.py`）。"""
+    """告警种类。存的是 varchar，加一个成员**不需要迁移**（见 `models/types.py`）。
+
+    ⚠️ 加成员**要改两个前端**：`KIND_NAMES` 那两份中文名映射由
+    `tests/test_frontend_source.py` 双向盯着，少一个就红。
+    """
 
     BALANCE_LOW = "balance_low"
     METRIC_ANOMALY = "metric_anomaly"
+
+    #: 库存可撑天数低于阈值。**客户级** —— 它是这张表里第一条 `account_id` 为
+    #: NULL 的告警，理由见 `Alert` 的类 docstring。
+    STOCK_LOW = "stock_low"
 
 
 class AlertStatus(StrEnum):
@@ -47,6 +55,21 @@ class Alert(Base, TimestampMixin):
 
     [schema]: ../../../docs/design/2026-08-19-schema-migration.md
 
+    ### 🔴 两个去重索引，因为 NULL 不等于 NULL
+
+    库存告警是**客户级的**（商品挂在客户上，一个客户可以有多个投放账户，推的是
+    同一批货），它的 `account_id` 是 NULL。而 **PostgreSQL 的唯一索引里 NULL 不
+    等于 NULL** —— 上面那个索引对 `account_id IS NULL` 的行形同虚设，两条一模
+    一样的库存告警不会冲突，于是巡检每小时新开一条，一天二十四条，每条看起来都对。
+
+    所以客户级那一半由**第二个部分索引**管（`WHERE ... AND account_id IS NULL`）。
+    两个索引互不重叠：第一个只可能命中 `account_id` 非空的行（NULL 行在唯一性上
+    彼此不冲突），第二个只看 NULL 行。
+
+    详见[库存断货设计][stock]第三节。
+
+    [stock]: ../../../docs/design/2026-08-21-stock-alerts.md
+
     ### `detail` 为什么是 JSONB 而不是几个列
 
     每种告警要记的数字不一样：余额记「还剩多少、日均多少、够几天」，指标异动记
@@ -61,7 +84,7 @@ class Alert(Base, TimestampMixin):
 
     __table_args__ = (
         # 🔴 同一件事同时只能有一条未解决。部分索引：resolved 的行不参与，所以
-        # 同一个 subject 的历史可以有很多条。
+        # 同一个 subject 的历史可以有很多条。**只管得住 account_id 非空的行**。
         Index(
             "uq_alerts_open_subject",
             "account_id",
@@ -70,13 +93,34 @@ class Alert(Base, TimestampMixin):
             unique=True,
             postgresql_where=text("status = 'open'"),
         ),
+        # 🔴 客户级告警（account_id IS NULL）的那一半。见类 docstring 里
+        # 「NULL 不等于 NULL」那一段 —— 少了这个索引不会有任何报错，只会每小时
+        # 多出一条一模一样的库存告警。
+        Index(
+            "uq_alerts_open_client_subject",
+            "client_id",
+            "kind",
+            "subject",
+            unique=True,
+            postgresql_where=text("status = 'open' AND account_id IS NULL"),
+        ),
         # 待办清单的查询形态：先按状态筛，再按发生时间排。
         Index(None, "status", "opened_at"),
+        # 客户端那条路径的查询形态：某个客户的告警。加了这一列之后过滤不再需要
+        # JOIN 回 ad_accounts。
+        Index(None, "client_id", "status"),
     )
 
     id: Mapped[int] = mapped_column(BigInteger(), primary_key=True)
 
-    account_id: Mapped[int] = mapped_column(ForeignKey("ad_accounts.id", ondelete="CASCADE"))
+    #: 🔴 **每条告警都属于某个客户**，账户级的从账户推导得出。它是客户端作用域
+    #: 过滤的落点 —— 有了它，`list_for_client` 不必 JOIN 回 `ad_accounts`，而
+    #: 少一次 JOIN 就是少一个能漏掉作用域的地方（CLAUDE.md 硬规矩 4）。
+    client_id: Mapped[int] = mapped_column(ForeignKey("clients.id", ondelete="CASCADE"))
+
+    #: 这条告警指向哪个投放账户。**NULL 表示它是客户级的**（目前只有库存断货：
+    #: 商品挂在客户上，同一批货可能被多个账户在推）。
+    account_id: Mapped[int | None] = mapped_column(ForeignKey("ad_accounts.id", ondelete="CASCADE"))
 
     # kind / status 用 varchar 存枚举值。这里没走 StrEnumType，是因为部分索引的
     # WHERE 子句要按字面量比较（`status = 'open'`），而那个自定义类型在索引表达式

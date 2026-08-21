@@ -13,7 +13,7 @@ server.
 
 [中文（主）](README.md) · [Design doc (zh)](docs/design/2026-08-19-mvp-design.md)
 
-> **Status: milestone D1–D14 of 14 — the feature scope is done.** The chain is:
+> **Status: milestone D1–D16 of 16 — the whole MVP scope is done.** The chain is:
 > import a CSV → raw snapshot → normalised daily metrics → rule sweep → alert
 > push → **daily report** (numbers computed in code, prose drafted by an LLM,
 > publishable only after a human edits it) → the client sees the published one.
@@ -212,28 +212,35 @@ written down so it does not become a silent assumption.
 
 The sample data is 3 clients and 4 ad accounts with 28 days of daily metrics,
 spanning Meta / TikTok, three currencies and three time zones, plus one action
-log entry per account and a **published report for yesterday**. It **only adds,
-never overwrites**, so re-running is safe; it refuses to run when
-`ENVIRONMENT=prod`.
+log entry per account, a **published report for yesterday**, and 3 products with
+stock snapshots. It **only adds, never overwrites**, so re-running is safe; it
+refuses to run when `ENVIRONMENT=prod`.
 
 ⚠️ The prose in that sample report is **canned text, not model output** — loading
 sample data should never quietly spend your money, so the seeder never calls an
 LLM (a test enforces this). Generate one yourself once `LLM_BASE_URL` is set to
 see the "model draft + human revision" pair side by side.
 
-Each account demonstrates a different rule outcome, so one sweep should produce
-**exactly** two alerts:
+Each account and each product demonstrates a different rule outcome, so one sweep
+should produce **exactly** three alerts:
 
 ```bash
 curl -H "Authorization: Bearer $TOKEN" -X POST localhost:8000/api/alerts/sweep
 curl -H "Authorization: Bearer $TOKEN" localhost:8000/api/alerts
 ```
 
-One is a prepaid account with roughly 2 days of balance left; the other spent the
-same money yesterday for half the conversions (CPA doubled). The third account is
-healthy, and the fourth is paused — it exists to prove that when average daily
-spend is 0, runway is **undefined** rather than zero, and nothing is alerted.
-That edge is the one most easily written as "0 days, alert immediately".
+One is a prepaid account with roughly 2 days of balance left; one spent the same
+money yesterday for half the conversions (CPA doubled); one is a hero SKU with a
+little over three days of stock left — that last one has a `null` `account_id`,
+because products hang off the client (the several ad accounts under one client
+push the same goods).
+
+The other three demonstrate cases that should **not** alert, and they matter more
+than the ones that do: an account that is paused (average daily spend is 0) and a
+product with only one stock snapshot (daily sales cannot be inferred). Both have
+an **undefined** runway rather than zero. That edge is the one most easily written
+as "0 days, alert immediately", and an alert like that teaches people to ignore
+the whole list.
 
 ### Working on it
 
@@ -375,6 +382,7 @@ regrows itself, the latter only holds messages still in flight.
 | D13 | LLM layer, call cost, action log | With a fake provider: structured input → validation → a row in `llm_calls`; actions can be recorded and queried | ✅ |
 | D14 | Report drafting / revision / publishing, anomaly diagnosis | Report carries the one line of plain English that matters, and an unrevised one cannot be published | ✅ |
 | D15 | Docs, screenshots, deploy | A stranger can run it within five minutes | ✅ |
+| D16 | Stock-out alerts | Two stock imports are enough to compute runway and open a client-level alert | ✅ |
 
 **Deliberately out of scope for v1:** no live Ads API (the adapter interface is
 reserved — platform app review takes longer than this milestone), no multi-tenant
