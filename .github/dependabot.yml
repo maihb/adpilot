@@ -1,0 +1,58 @@
+# 依赖更新的自动化。
+#
+# 立这个文件的直接起因：CI 冒出「Node.js 20 is deprecated」的 annotation，而
+# **annotation 不会让构建失败** —— 它可以一直被忽略到 GitHub 真的移除兼容层那天，
+# 那时是四个 job 一起红，而且是在某次不相干的推送上红。
+#
+# 这正是本仓库那条规矩的反面例子：「一条规矩重要，就把它写成 lint、类型检查或
+# 测试；只活在文字里的约定一定会腐化」。「记得定期看看依赖有没有过时」是典型的
+# 活在文字里的约定，这里把它交给机器。
+#
+# **月度而不是周度**：这是个单人项目，每周三个 PR 的噪音会让人开始无视它们，而
+# 一个被无视的机器人比没有机器人更糟。月度的量刚好还愿意点开看。
+#
+# 每个生态**合成一个 PR**（groups），理由同上：五个分散的 PR 里有一个红了，很容易
+# 被当成「那个先放着」；一个 PR 红了就必须处理。
+version: 2
+
+updates:
+  # 这次出问题的就是它。action 的大版本更新不频繁，但每一次都可能是「现在只是
+  # 警告、将来直接失败」。
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    groups:
+      actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: "CI"
+
+  # 两个前端**刻意不共用依赖**（运行时不同，见
+  # docs/design/2026-08-21-admin-console.md 第二节），所以两个目录各自更新。
+  #
+  # ⚠️ 前端依赖的升级最容易破坏构建，但拦得住：frontend job 会跑 npm ci、
+  # 两边的 vue-tsc 和纯函数单测。让 PR 红在那里，正是这套门禁的用途。
+  - package-ecosystem: "npm"
+    directories:
+      - "/client"
+      - "/admin"
+    schedule:
+      interval: "monthly"
+    groups:
+      frontend:
+        patterns: ["*"]
+    commit-message:
+      prefix: "前端依赖"
+
+  # Python 侧走 uv.lock。CI 用 `uv sync --frozen`，所以 lock 一旦落后于上游，
+  # 更新它就是唯一的入口。
+  - package-ecosystem: "uv"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    groups:
+      python:
+        patterns: ["*"]
+    commit-message:
+      prefix: "依赖"
