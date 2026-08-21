@@ -12,6 +12,7 @@ schema 怎么演进、autogenerate 有哪些盲区，见
 
 from __future__ import annotations
 
+from adpilot.models.action import Action, ActionKind, ActionSource
 from adpilot.models.ad_account import AdAccount, Platform
 from adpilot.models.alert import Alert, AlertKind, AlertStatus
 from adpilot.models.balance import Balance
@@ -20,6 +21,9 @@ from adpilot.models.daily_metric import DailyMetric, MetricLevel
 from adpilot.models.invite import Invite
 
 __all__ = [
+    "Action",
+    "ActionKind",
+    "ActionSource",
     "AdAccount",
     "Alert",
     "AlertKind",

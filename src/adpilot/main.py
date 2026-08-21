@@ -14,6 +14,7 @@ import structlog
 from fastapi import APIRouter, Depends, FastAPI, status
 
 from adpilot.api import (
+    action,
     ad_account,
     alert,
     auth,
@@ -96,6 +97,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         daily_metric.router,
         balance.router,
         alert.router,
+        action.router,
         task.router,
     ):
         _include_operator_router(app, router, settings)

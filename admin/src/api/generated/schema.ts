@@ -669,6 +669,44 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/ad-accounts/{account_id}/actions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Actions
+         * @description 列出某账户的操作记录，**最近做的在前**。
+         *
+         *     排序按 `performed_at` 而不是登记时间：补登记的那几条录入更晚、描述的事更早，
+         *     按登记时间排会读不出投放的先后。
+         *
+         *     日报取的是另一个形态（某个自然日区间、按发生先后正序），走服务层的
+         *     `list_in_window`，不经这个接口。
+         */
+        get: operations["listActions"];
+        put?: never;
+        /**
+         * Record Action
+         * @description 登记一次投放调整。
+         *
+         *     **手动登记是 MVP 的唯一入口，且这不是妥协**（设计文档第十节第 4 条）：接了
+         *     Ads API 之后自动抓变更日志也只能补上「改了什么」，补不上 `reason` 那一段
+         *     ——「为什么这么调」只存在于操作的人脑子里，当场不记，三天后就没了。而日报里
+         *     真正值钱的正是那一段。
+         *
+         *     `performed_at` 是操作**实际发生**的时刻（不是登记时刻），要带时区；落在未来
+         *     的直接 422 —— 那样的记录永远不会出现在任何一期日报里。
+         */
+        post: operations["recordAction"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/tasks/{task_id}": {
         parameters: {
             query?: never;
@@ -699,6 +737,81 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * ActionCreateRequest
+         * @description 登记一次投放调整。
+         *
+         *     **没有 `source`**：手动登记的一律是 `manual`。放一个参数出去，人手工登记时
+         *     随手标成「平台抓的」，`reason` 到底可不可信就再也答不上来了。
+         */
+        ActionCreateRequest: {
+            kind: components["schemas"]["ActionKind"];
+            /** @default account */
+            level: components["schemas"]["MetricLevel"];
+            /** Object Id */
+            object_id?: string | null;
+            /** Object Name */
+            object_name?: string | null;
+            /** Summary */
+            summary: string;
+            /** Reason */
+            reason: string;
+            /**
+             * Performed At
+             * Format: date-time
+             */
+            performed_at: string;
+            /** Operator */
+            operator?: string | null;
+        };
+        /** ActionItem */
+        ActionItem: {
+            /** Id */
+            id: number;
+            /** Account Id */
+            account_id: number;
+            kind: components["schemas"]["ActionKind"];
+            /** Source */
+            source: string;
+            level: components["schemas"]["MetricLevel"];
+            /** Object Id */
+            object_id: string | null;
+            /** Object Name */
+            object_name: string | null;
+            /** Summary */
+            summary: string;
+            /** Reason */
+            reason: string;
+            /**
+             * Performed At
+             * Format: date-time
+             */
+            performed_at: string;
+            /** Operator */
+            operator: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /**
+         * ActionKind
+         * @description 调整的类型。存的是 varchar，加一个成员**不需要迁移**（见 `models/types.py`）。
+         *
+         *     分这几类是为了让「本期做了什么」**可数**（设计文档第十节第 4 条）—— 日报要能
+         *     写出「本周改了 3 次预算、换了 2 组素材」，而那句话只有在类型是枚举、不是自由
+         *     文本时才写得出来。分不进去的写 `OTHER` 并在 `summary` 里说清楚。
+         * @enum {string}
+         */
+        ActionKind: "budget" | "bid" | "creative" | "targeting" | "status" | "other";
+        /** ActionListResponse */
+        ActionListResponse: {
+            /** Items */
+            items: components["schemas"]["ActionItem"][];
+            /** Total */
+            total: number;
+        };
         /**
          * AdAccountCreateRequest
          * @description 建一个广告账户。
@@ -1588,7 +1701,7 @@ export interface operations {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
-            /** @description 服务端未配置认证 */
+            /** @description 服务端缺少必要配置（认证、LLM 等） */
             503: {
                 headers: {
                     [name: string]: unknown;
@@ -1626,7 +1739,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description 服务端未配置认证 */
+            /** @description 服务端缺少必要配置（认证、LLM 等） */
             503: {
                 headers: {
                     [name: string]: unknown;
@@ -1677,7 +1790,7 @@ export interface operations {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
-            /** @description 服务端未配置认证 */
+            /** @description 服务端缺少必要配置（认证、LLM 等） */
             503: {
                 headers: {
                     [name: string]: unknown;
@@ -1715,7 +1828,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description 服务端未配置认证 */
+            /** @description 服务端缺少必要配置（认证、LLM 等） */
             503: {
                 headers: {
                     [name: string]: unknown;
@@ -2927,6 +3040,113 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    listActions: {
+        parameters: {
+            query?: {
+                /** @description 页码，从 1 起 */
+                page?: number;
+                /** @description 每页条数，上限 100 */
+                page_size?: number;
+            };
+            header?: never;
+            path: {
+                account_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ActionListResponse"];
+                };
+            };
+            /** @description 没带 token、token 无效或已过期 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    recordAction: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                account_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ActionCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ActionItem"];
+                };
+            };
+            /** @description 没带 token、token 无效或已过期 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 入参不合法，或引用了不存在的对象 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };

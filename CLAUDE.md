@@ -32,6 +32,7 @@
 | 金额 / 时区 / 类型 / 异步 / 测试 / 日志 / 配置密钥 / **改完必做清单** | [`docs/code-rules/conventions.md`](docs/code-rules/conventions.md) |
 | **加一个接口**（含可照抄的四步与踩坑速查） | [`docs/code-rules/api.md`](docs/code-rules/api.md) |
 | 分支 / 提交信息 / **推送前自检** / 需明确指令的操作 | [`docs/code-rules/git-workflow.md`](docs/code-rules/git-workflow.md) |
+| **登记投放操作 / 日报「本期做了什么」的来源** | [`docs/business/actions.md`](docs/business/actions.md) |
 | **加一个后台任务**（重试与死信怎么分流、worker 里的两个致命坑） | [`docs/business/tasks.md`](docs/business/tasks.md) |
 | **加一条规则或告警**（状态机怎么去重、通知怎么不重复打扰） | [`docs/business/alerts.md`](docs/business/alerts.md) |
 | **指标口径、时区、数据回填、告警公式** | [`docs/business/glossary.md`](docs/business/glossary.md) |

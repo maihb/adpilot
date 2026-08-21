@@ -40,7 +40,7 @@
 | [异步任务](tasks.md) | `tasks` | Celery + RabbitMQ、重试与死信队列、任务状态查询、定时排期 | `db/broker.py` `tasks/` `services/task.py` | ✅ D6：归一化已异步化；D8：告警巡检已进 `beat_schedule`（**要另起一个 beat 进程**） |
 | [余额与账户](balances.md) | `balances` | 余额快照录入、可撑天数 | `rules/balance.py` `services/balance.py` | ✅ D7 |
 | [告警与巡检](alerts.md) | `alerts` | 状态机去重、定时巡检、指标异动、webhook 推送 | `rules/anomaly.py` `services/alert.py` `tasks/alerts.py` `notifiers/` | ✅ D8：巡检自动跑、同一件事只报一次；库存断货未做 |
-| 操作记录 | — | 「本期做了什么」的唯一数据来源，**发布日报前校验非空** | `services/actions.py`（🚧） | 🚧 D12–D13：日报的前置依赖，见[设计文档第十节第 4 条](../design/2026-08-19-mvp-design.md#4-投放操作记录mvp-手动登记必填) |
+| [操作记录](actions.md) | `actions` | 「本期做了什么」的唯一数据来源，**`reason` 必填** —— 平台变更日志补得上「改了什么」，补不上「为什么」 | `models/action.py` `services/action.py` `api/action.py` | ✅ D13：登记与查询已通；自动抓平台变更日志未做，[发布前校验非空](../design/2026-08-19-mvp-design.md#4-投放操作记录mvp-手动登记必填)随日报走 |
 | 日报 | — | 生成、人工修订、发布、**快照固定** | `services/reports.py`（🚧） | 🚧 D12–D13 |
 | LLM | — | 日报撰写、异常诊断、调用成本记录 | `llm/`（🚧） | 🚧 D12–D13 |
 | 健康检查 | `health` | 存活与就绪探针 | `api/health.py` | ✅ 已落地 |
