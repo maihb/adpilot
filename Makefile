@@ -148,9 +148,15 @@ client: ## 起客户端 H5 开发服务器（先 make up + make dev）
 admin: ## 起内部后台开发服务器（先 make up + make dev）
 	npm --prefix admin run dev
 
-# 客户端那两道门禁。type-check 吃的是上面生成的类型，所以后端改了形状而没跑
+# 两个前端的门禁。type-check 吃的是上面生成的类型，所以后端改了形状而没跑
 # make openapi 的话，会在这里表现成「前端用了不存在的字段」。
-client-check: ## 两个前端的门禁：vue-tsc + 纯函数单测
+client-check: ## 两个前端的门禁：lock 同步 + vue-tsc + 纯函数单测
+	# 🔴 先验 package.json 和 lock 同步。**本地习惯跑 npm install，CI 跑的是
+	# npm ci**，而两者对「lock 里的版本和重新解析的结果不一致」的容忍度不同：
+	# install 默默接受，ci 直接拒绝。这个差异只在 CI 上暴露，而那时已经推出去了。
+	# --dry-run 不动 node_modules，半秒就跑完。
+	npm --prefix client ci --dry-run
+	npm --prefix admin ci --dry-run
 	npm --prefix client run type-check
 	npm --prefix client test
 	npm --prefix admin run type-check
