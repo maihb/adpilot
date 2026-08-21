@@ -3,7 +3,7 @@
  *
  * 🔴 **这个文件和 `series.ts` 是客户端仅有的两个允许做数字转换的地方。**
  * `pages/` 和 `stores/` 里一律不许出现 `Number(` 或 `parseFloat(` —— 有一条
- * 扫源码的测试盯着（`tests/test_client_source.py`）。
+ * 扫源码的测试盯着（`tests/test_frontend_source.py`）。
  *
  * 立这条规矩是为了一个具体的坑：后端的金额和比率序列化出来**永远是 JSON
  * 字符串**（`conventions.md` 的「金额」一节），而 JS 里
@@ -127,4 +127,24 @@ export function runwayState(available: DecimalStr, daysLeft: DecimalStr): Runway
     return 'idle'
   }
   return 'known'
+}
+
+/**
+ * 环比变化，给日报用。**算不出来返回 `null` —— 调用方整段不显示。**
+ *
+ * 三种算不出来，处理方式都一样：对照期没有数据（后端把 baseline 三列同时置空）、
+ * 对照值是 0（这个除法没有意义）、当期值本身无定义（比如没有转化时的 CPA）。
+ *
+ * 🔴 **返回「+100%」比留白危险得多。** 客户会拿那个百分比去做判断，而它根本没有
+ * 基线 —— 这正是后端宁可把三列一起留空、也不补一个 0 的理由（`reports.md` 的
+ * 数字口径一节）。
+ */
+export function formatChange(current: DecimalStr, baseline: DecimalStr): string | null {
+  const now = toNumber(current)
+  const then = toNumber(baseline)
+  if (now === null || then === null || then === 0) {
+    return null
+  }
+  const percent = ((now - then) / then) * 100
+  return `${percent >= 0 ? '+' : ''}${group(percent, 1)}%`
 }

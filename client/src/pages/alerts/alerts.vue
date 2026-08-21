@@ -50,7 +50,7 @@ function toggle(): void {
  * ⚠️ 这份映射是**后端枚举在前端的第二份拷贝**，而回落逻辑让「对不上」这件事
  * 不会报错、只会安静地把英文标识显示给客户（写这段时就把 `balance_low` 记成了
  * `balance_runway`，是跑起来才看见的）。所以有一条测试双向盯着它和
- * `models/alert.py` 的 `AlertKind`：`tests/test_client_source.py`。
+ * `models/alert.py` 的 `AlertKind`：`tests/test_frontend_source.py`。
  */
 const KIND_NAMES: Record<string, string> = {
   balance_low: '余额',

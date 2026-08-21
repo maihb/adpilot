@@ -19,7 +19,7 @@ const end = todayIso()
 const start = addDays(end, -(WINDOW_DAYS - 1))
 
 onLoad((query) => {
-  // 页面里不许出现 Number(——转换一律走 utils（tests/test_client_source.py 盯着）。
+  // 页面里不许出现 Number(——转换一律走 utils（tests/test_frontend_source.py 盯着）。
   accountId.value = toNumber(query?.id) ?? 0
   uni.setNavigationBarTitle({ title: readName(query?.name) || '账户明细' })
   void load()

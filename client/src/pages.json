@@ -7,6 +7,12 @@
       }
     },
     {
+      "path": "pages/reports/reports",
+      "style": {
+        "navigationBarTitleText": "日报"
+      }
+    },
+    {
       "path": "pages/alerts/alerts",
       "style": {
         "navigationBarTitleText": "要注意的事"
@@ -29,6 +35,12 @@
       "style": {
         "navigationBarTitleText": "打开我的看板"
       }
+    },
+    {
+      "path": "pages/report/report",
+      "style": {
+        "navigationBarTitleText": "日报详情"
+      }
     }
   ],
   "tabBar": {
@@ -40,6 +52,10 @@
       {
         "pagePath": "pages/index/index",
         "text": "看板"
+      },
+      {
+        "pagePath": "pages/reports/reports",
+        "text": "日报"
       },
       {
         "pagePath": "pages/alerts/alerts",

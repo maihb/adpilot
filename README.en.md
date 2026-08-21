@@ -17,9 +17,8 @@ server.
 > import a CSV → raw snapshot → normalised daily metrics → rule sweep → alert
 > push → **daily report** (numbers computed in code, prose drafted by an LLM,
 > publishable only after a human edits it) → the client sees the published one.
-> **Two screens are still missing**: report editing/publishing in the admin
-> console, and the report screen in the client app — the APIs are there, but an
-> operator has to call them directly for now. The [roadmap](#roadmap) marks what
+> **One screen is still missing**: report editing/publishing in the admin
+> console — the APIs are there, but an operator has to call them directly for now. The [roadmap](#roadmap) marks what
 > is real and what is not — this README will never claim a feature that does not
 > exist.
 

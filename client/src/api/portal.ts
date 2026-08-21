@@ -47,3 +47,21 @@ export function listAlerts(onlyOpen = true): Promise<Schemas['PortalAlertListRes
     query: { only_open: onlyOpen },
   })
 }
+
+export type PortalReport = Schemas['PortalReportItem']
+
+/**
+ * 我的日报，最近那天的在前。
+ *
+ * ⚠️ **只会返回已发布的**（后端把 `status = published` 写在服务层的查询条件里）。
+ * 草稿和「模型写完但还没人审」的那些在这里根本不存在 —— 那道人工闸门是数字正确性
+ * 的最后一道防线，见 `docs/business/reports.md`。
+ */
+export function listReports(): Promise<Schemas['PortalReportListResponse']> {
+  return request<Schemas['PortalReportListResponse']>('/portal/reports')
+}
+
+/** 一份日报的全文。不属于自己的、以及还没发布的，一律 404（不是 403）。 */
+export function getReport(reportId: number): Promise<PortalReport> {
+  return request<PortalReport>(`/portal/reports/${reportId}`)
+}

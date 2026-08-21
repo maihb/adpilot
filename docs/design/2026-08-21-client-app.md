@@ -48,6 +48,11 @@ openapi.json 的门禁、签名比对靠扫源码的测试。**前端拿不到�
 
 四屏，不多不少：
 
+> **D14 加了第五屏：日报。** 写这份设计时日报服务还不存在，所以当时的「四屏，
+> 不多不少」是对的 —— 那一屏没有可显示的东西。日报的显示口径（对照期缺数据时
+> 整段不做环比、不显示会跨天的操作时刻）记在
+> [`docs/business/client-app.md`](../business/client-app.md)。
+
 ```
 扫码页 ── 换到票 ──▶ 首页（账户列表 + 每个账户的可撑天数）
                         │
@@ -288,7 +293,7 @@ client/src/
 ### 那条「禁止 `Number(`」的规则，写成 pytest 而不是 ESLint
 
 原稿说加一条 `no-restricted-syntax`。落地时换成了扫源码的 pytest
-（`tests/test_client_source.py`），两个理由：
+（`tests/test_frontend_source.py`），两个理由：
 
 - 规则本身只要**一条正则**，而为它引一整套 JS lint 工具链（eslint + vue 解析器
   + ts 解析器）要装的东西比被测的规则重得多；

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   NO_VALUE,
+  formatChange,
   formatCount,
   formatDays,
   formatMoney,
@@ -83,5 +84,22 @@ describe('runwayState', () => {
   it('余额真的是 0 仍然算 known', () => {
     // 「余额 0」是一个事实，和「没录过」不是一回事。
     expect(runwayState('0', '0')).toBe('known')
+  })
+})
+
+describe('formatChange', () => {
+  it('给出带符号的百分比', () => {
+    expect(formatChange('124.1', '100')).toBe('+24.1%')
+    expect(formatChange('76', '100')).toBe('-24.0%')
+  })
+
+  it('对照期缺数据时返回 null，让调用方整段不显示', () => {
+    // 🔴 补一个 0 会算出「上升了 100%」这种凭空的百分比，而客户会拿它做判断
+    expect(formatChange('120', null)).toBeNull()
+    expect(formatChange(null, '100')).toBeNull()
+  })
+
+  it('对照值是 0 时返回 null —— 那个除法没有意义', () => {
+    expect(formatChange('120', '0')).toBeNull()
   })
 })
