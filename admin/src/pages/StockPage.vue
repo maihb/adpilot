@@ -9,24 +9,12 @@ import {
   type StockImportResult,
   type StockRunway,
 } from '../api/endpoints'
+import { SALES_SOURCE_NAMES, nameOf } from '../api/enums'
 import { reason } from '../api/request'
 import { formatCount, formatInstant } from '../utils/format'
 
 /** 后端上限，超了回 413。**在选文件时就拦**，同 ImportPage。 */
 const MAX_BYTES = 2 * 1024 * 1024
-
-/**
- * 日均销量的三种来源 → 给人看的一句话。
- *
- * 🔴 **这一列不是装饰。** 推算出来的日均建立在「两次导入之间没补过货」这个假设
- * 上，而运营看到「还能撑 3 天」时第一个该问的就是这个数可信不可信。藏起来的话，
- * 一个刚补过货的款会显示成即将断货，而没有任何线索指向原因。
- */
-const SALES_SOURCE_NAMES: Record<string, string> = {
-  file: '来自导出文件',
-  inferred: '按库存变化推算',
-  none: '算不出来',
-}
 
 const clients = ref<Client[]>([])
 const clientId = ref<number>()
@@ -112,7 +100,7 @@ async function submit(): Promise<void> {
 }
 
 function sourceName(source: string): string {
-  return SALES_SOURCE_NAMES[source] ?? source
+  return nameOf(SALES_SOURCE_NAMES, source)
 }
 </script>
 

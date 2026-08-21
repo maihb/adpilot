@@ -18,6 +18,7 @@ export type Balance = Schemas['BalanceItem']
 export type ImportResult = Schemas['ImportResponse']
 export type TaskStatus = Schemas['TaskStatusResponse']
 export type Report = Schemas['ReportItem']
+export type Action = Schemas['ActionItem']
 export type Product = Schemas['ProductItem']
 export type StockRunway = Schemas['StockRunwayResponse']
 export type StockImportResult = Schemas['StockImportResponse']
@@ -134,6 +135,33 @@ export function recordBalance(
   body: Schemas['BalanceCreateRequest'],
 ): Promise<Balance> {
   return request<Balance>(`/ad-accounts/${accountId}/balances`, { method: 'POST', body })
+}
+
+// —— 投放操作记录 ————————————————————————————————————
+//
+// 🔴 日报发布**硬校验这张表当期非空**（services/report.py）。也就是说：不登记，
+// 日报就发不出去 —— 这两个接口不是可有可无的台账，它们在运营那条动线上。
+
+export function listActions(accountId: number): Promise<Schemas['ActionListResponse']> {
+  return request<Schemas['ActionListResponse']>(`/ad-accounts/${accountId}/actions`, {
+    query: { page: 1, page_size: 50 },
+  })
+}
+
+/**
+ * 登记一次投放调整。
+ *
+ * **可逆那一级**（admin.md 的三级分类）：这张表没有修改和删除，但填错了再登记
+ * 一条说明即可 —— 那本身也是投放过程的一部分。所以不需要二次确认。
+ *
+ * `source` 不在入参里，后端也不接受：手工登记的一律 `manual`。放它出去，人会
+ * 随手标成「平台抓的」，于是「这条的 reason 可不可信」再也答不上来。
+ */
+export function recordAction(
+  accountId: number,
+  body: Schemas['ActionCreateRequest'],
+): Promise<Action> {
+  return request<Action>(`/ad-accounts/${accountId}/actions`, { method: 'POST', body })
 }
 
 export function listAlerts(onlyOpen: boolean): Promise<Schemas['AlertListResponse']> {

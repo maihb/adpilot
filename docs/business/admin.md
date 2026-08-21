@@ -3,7 +3,7 @@
 **代码**：`admin/src/pages/`（七屏）· `admin/src/api/request.ts`（唯一请求出口）·
 `admin/src/utils/format.ts`（口径怎么显示）· `tests/test_frontend_source.py`（形状门禁）
 
-**范围出处**：[内部后台设计](../design/2026-08-21-admin-console.md) · 里程碑 D12（日报屏 D14、库存屏 D16）
+**范围出处**：[内部后台设计](../design/2026-08-21-admin-console.md) · 里程碑 D12（日报屏 D14、库存屏 D16、操作记录 D17）
 
 **OpenAPI tag**：无。它消费的是内部那八组接口，自己不提供接口。
 
@@ -24,7 +24,12 @@
 | **日报** | 每天，出完告警之后 | `generateReport` · `reviseReport` · `publishReport` |
 | 客户列表 / 新建 | 新客户上手时 | `listClients` · `createClient` |
 | 客户详情 | 发邀请码、停用客户 | `listInvites` · `createInvite` · `revokeInvite` · `updateClient` |
-| 账户明细 | 核对数字、录余额、重跑归一化 | `listDailyMetrics` · `recordBalance` · `normalizeAccount` |
+| 账户明细 | 核对数字、**登记调整**、录余额、重跑归一化 | `listActions` · `recordAction` · `listDailyMetrics` · `recordBalance` · `normalizeAccount` |
+
+🔴 **「登记一次调整」不是台账，它在运营那条动线上。** 日报发布硬校验当期操作记录
+非空（`services/report.py`），所以**不登记就发不出去**。D17 之前这一步只能调接口，
+而日报屏上那句「先去账户明细登记」指向的正是一个不存在的地方 —— 那是这个后台唯一
+一条走不通的链，修它比加任何新屏都值。
 
 **首页就是导入**，没有仪表盘。做一个「今日概览」很好看，但它回答的问题（哪个账户
 花超了）告警页已经在回答，而且回答得更准 —— 两个地方说同一件事，早晚有一天会说得

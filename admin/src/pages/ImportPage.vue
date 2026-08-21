@@ -10,6 +10,7 @@ import {
   type ImportResult,
   type TaskStatus,
 } from '../api/endpoints'
+import { METRIC_LEVEL_NAMES, options } from '../api/enums'
 import { reason } from '../api/request'
 
 /** 后端上限，超了回 413。**在选文件时就拦** —— 传完十兆再说不行，那十兆是白传的。 */
@@ -18,13 +19,6 @@ const MAX_BYTES = 10 * 1024 * 1024
 /** 轮询上限。无限轮询的页面在标签页里留一夜，会把日志刷满。 */
 const MAX_POLLS = 30
 const POLL_INTERVAL_MS = 1000
-
-const LEVELS = [
-  { value: 'account', label: '账户' },
-  { value: 'campaign', label: '广告系列' },
-  { value: 'adgroup', label: '广告组' },
-  { value: 'ad', label: '广告' },
-]
 
 const accounts = ref<AdAccount[]>([])
 const accountId = ref<number>()
@@ -150,7 +144,7 @@ async function normalizeNow(): Promise<void> {
 
       <el-form-item label="投放层级">
         <el-radio-group v-model="level">
-          <el-radio v-for="item in LEVELS" :key="item.value" :value="item.value">
+          <el-radio v-for="item in options(METRIC_LEVEL_NAMES)" :key="item.value" :value="item.value">
             {{ item.label }}
           </el-radio>
         </el-radio-group>

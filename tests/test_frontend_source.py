@@ -51,6 +51,16 @@ _KIND_BLOCK = re.compile(r"const KIND_NAMES:[^{]*\{(.*?)\n\}", re.DOTALL)
 _STATUS_BLOCK = re.compile(r"const REPORT_STATUS_NAMES:[^{]*\{(.*?)\n\}", re.DOTALL)
 _KIND_KEY = re.compile(r"^\s*(\w+):", re.MULTILINE)
 
+#: 后台那个「枚举镜像」模块。上面两份映射长在页面里（各有一条更老的门禁），
+#: 后加的都收口到这里 —— 散在页面里的时候，门禁只盯得住它认得出名字的那几份。
+ADMIN_ENUMS = ADMIN_SRC / "api" / "enums.ts"
+
+
+def _mapping_keys(source: str, name: str) -> set[str]:
+    block = re.search(rf"const {re.escape(name)}:[^{{]*\{{(.*?)\n\}}", source, re.DOTALL)
+    assert block is not None, f"{ADMIN_ENUMS.name} 里找不到 {name} —— 改名了就把这条测试一起改"
+    return set(_KIND_KEY.findall(block.group(1)))
+
 
 def _sources(root: Path, *subdirs: str) -> list[Path]:
     """收集要扫的源码。测试文件不算 —— 断言里出现 `Number(` 是正常的。"""
@@ -236,6 +246,77 @@ def test_report_status_names_match_the_backend_enum() -> None:
             )
 
     assert checked, "一份 REPORT_STATUS_NAMES 都没扫到 —— 是不是改名了？改了就把这条测试一起改"
+
+
+def test_admin_enum_mirrors_match_the_backend() -> None:
+    """🔴 `api/enums.ts` 里的每份映射都要和后端枚举**双向对齐**。
+
+    和上面告警、日报状态那两条同源，守的是同一类错误：页面对认不出的值回落到
+    原始标识，所以**对不上时不会报错**，只会把一个英文字符串安静地显示给运营。
+
+    这里多守一层：`METRIC_LEVEL_NAMES` 决定登记操作时能选哪几个层级，而
+    `actions.level` 和 `daily_metrics.level` 共用一套枚举 —— 两边对不上时，
+    「改了这个系列的预算」和这个系列当天的花费就再也对不到一起，**而那天没有
+    任何东西会报错**（[actions.md](../docs/business/actions.md) 点名说了这条）。
+    """
+    from adpilot.models.action import ActionKind
+    from adpilot.models.daily_metric import MetricLevel
+
+    assert ADMIN_ENUMS.is_file(), f"{ADMIN_ENUMS} 不在 —— 挪走了就把这条测试一起改"
+    source = ADMIN_ENUMS.read_text(encoding="utf-8")
+
+    from adpilot.services import product as product_service
+
+    # 最后一份对应的**不是枚举**，是服务层那三个常量 —— 「不是枚举」不代表拷贝
+    # 对不上时会有人发现，所以照样双向盯着。
+    expected = {
+        "ACTION_KIND_NAMES": ({member.value for member in ActionKind}, "ActionKind"),
+        "METRIC_LEVEL_NAMES": ({member.value for member in MetricLevel}, "MetricLevel"),
+        "SALES_SOURCE_NAMES": (
+            {
+                product_service.SALES_FROM_FILE,
+                product_service.SALES_INFERRED,
+                product_service.SALES_UNKNOWN,
+            },
+            "services/product.py 的 SALES_* 常量",
+        ),
+    }
+
+    for name, (backend, origin) in expected.items():
+        mapped = _mapping_keys(source, name)
+        assert mapped == backend, (
+            f"{name} 和后端 {origin} 对不上。\n"
+            f"  后端有而前端没给中文名：{sorted(backend - mapped) or '无'}\n"
+            f"  前端有而后端已经没有：{sorted(mapped - backend) or '无'}"
+        )
+
+
+def test_pages_do_not_keep_private_enum_copies() -> None:
+    """页面里不许再长出新的「枚举 → 中文名」映射。
+
+    这条挡的是「顺手在页面里再写一份」那个很自然的冲动。散着的拷贝不会被上面
+    那条门禁看见 —— `ImportPage` 里那份层级清单就这么躺了好几轮，一直没有任何
+    东西盯着它。
+
+    **两个既有的例外写在这里**（`KIND_NAMES` / `REPORT_STATUS_NAMES`）：它们各有
+    一条更老的、按名字抓的门禁，搬进 enums.ts 要同时改那两条测试，是另一件事。
+    """
+    allowed = {"KIND_NAMES", "REPORT_STATUS_NAMES"}
+    pattern = re.compile(r"const (\w*(?:NAMES|LEVELS|KINDS))\s*[:=]")
+
+    hits = [
+        f"{path.relative_to(ADMIN_SRC.parent)}:{lineno}  {name}"
+        for path in _sources(ADMIN_SRC, "pages", "components")
+        for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1)
+        if not _COMMENT_LINE.match(line)
+        for name in pattern.findall(line)
+        if name not in allowed
+    ]
+
+    assert not hits, (
+        "别在页面里新写一份枚举映射 —— 那样它就不在任何门禁的视野里了。"
+        f"放到 {ADMIN_ENUMS.name}，那个文件有测试双向盯着：\n" + "\n".join(hits)
+    )
 
 
 def test_pages_do_not_swallow_the_backend_message() -> None:

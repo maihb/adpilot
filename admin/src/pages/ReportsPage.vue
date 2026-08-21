@@ -307,12 +307,21 @@ function statusTag(status: string): 'info' | 'warning' | 'success' {
 
         <div class="block">
           <div class="block-title">本期做了什么（客户会看到这一段）</div>
-          <el-alert
-            v-if="!editing.actions_snapshot.length"
-            type="warning"
-            :closable="false"
-            title="这一期没有任何操作记录，发不出去。先去账户明细登记当天做过的调整，再回来重新生成。"
-          />
+          <el-alert v-if="!editing.actions_snapshot.length" type="warning" :closable="false">
+            <template #title>
+              <!-- 🔴 这句话从 D14 起就在指路，而它指向的那一屏到 D17 才有 ——
+                   在那之前登记操作只能 curl。所以这里给的是一个能点的链接，不是
+                   一句「去某处」：运营已经在这个抽屉里了，让他自己去找那个账户,
+                   等于把断链换成了一段路。
+                   ⚠️ 登记完必须重新生成：日报的数字和操作快照都是生成那一刻固定
+                   下来的（glossary 的「日报快照」），新登记的那条不会自己长进来。 -->
+              这一期没有任何操作记录，发不出去。先去
+              <router-link :to="`/accounts/${editing.account_id}`" target="_blank">
+                这个账户的明细
+              </router-link>
+              登记当天做过的调整，再回来<b>重新生成</b>这一期。
+            </template>
+          </el-alert>
           <div v-for="(action, i) in editing.actions_snapshot" :key="i" class="action">
             <div class="action-summary">{{ action.summary }}</div>
             <div class="action-reason">{{ action.reason }}</div>
