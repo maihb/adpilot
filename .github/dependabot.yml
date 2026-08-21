@@ -42,6 +42,15 @@ updates:
     groups:
       frontend:
         patterns: ["*"]
+    ignore:
+      # 🔴 uni-app 全家必须用**同一个日期构建版本**（3.0.0-5020420260813003 这种）。
+      # 那不是语义版本，Dependabot 没法把它们当成一组一起升 —— 它会单独把
+      # @dcloudio/types 升到 ^3.4.32，而 @dcloudio/uni-app 的 peer 立刻不满足。
+      #
+      # 这不是假想：**第一个 Dependabot PR 就是这么红的**（ERESOLVE，client 的
+      # npm ci 都没跑起来）。升级 uni-app 要人整体来：把所有 @dcloudio/* 换成
+      # 同一个新日期版本，然后跑一遍 make client-check。
+      - dependency-name: "@dcloudio/*"
     commit-message:
       prefix: "前端依赖"
 
