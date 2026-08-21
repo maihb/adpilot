@@ -28,29 +28,32 @@ updates:
     commit-message:
       prefix: "CI"
 
-  # 两个前端**刻意不共用依赖**（运行时不同，见
-  # docs/design/2026-08-21-admin-console.md 第二节），所以两个目录各自更新。
+  # 🔴 **只管 admin，不管 client。**
   #
-  # ⚠️ 前端依赖的升级最容易破坏构建，但拦得住：frontend job 会跑 npm ci、
-  # 两边的 vue-tsc 和纯函数单测。让 PR 红在那里，正是这套门禁的用途。
+  # 两个前端的依赖模型根本不同，配置得反映这个现实而不是对称处理：
+  #
+  # - **admin** 是普通的 Vue 3 + vite 项目，每个包各自按语义版本演进，Dependabot
+  #   能正确处理。
+  # - **client 的整条工具链被 uni-app 钉死。** `@dcloudio/vite-plugin-uni` 的 peer
+  #   写的是 `vite: '5.2.8'` —— **精确一个版本，不是范围**；而所有 `@dcloudio/*`
+  #   必须用同一个日期构建号（3.0.0-5020420260813003 这种），那根本不是语义版本。
+  #   于是 vite / vitest / vue-tsc / typescript / @dcloudio/* 是一个**必须整体
+  #   替换**的集合，而 Dependabot 的模型是逐包升级，两者对不上。
+  #
+  # 这不是推测，是连续两个 PR 撞出来的：#2 单独升 @dcloudio/types 撞上
+  # uni-app 的 peer，#3 把 vite 升到 8 撞上 vite-plugin-uni 的 peer，两次都是
+  # ERESOLVE，client 的 npm ci 连装都没装起来。
+  #
+  # **client 的升级方式是人整体来**：换一个新的 uni-app 日期版本 + 它要求的 vite
+  # 版本，然后跑 make client-check。⚠️ 安全更新不受影响 —— 那是仓库级的 Dependabot
+  # alerts，不看这个文件。
   - package-ecosystem: "npm"
-    directories:
-      - "/client"
-      - "/admin"
+    directory: "/admin"
     schedule:
       interval: "monthly"
     groups:
       frontend:
         patterns: ["*"]
-    ignore:
-      # 🔴 uni-app 全家必须用**同一个日期构建版本**（3.0.0-5020420260813003 这种）。
-      # 那不是语义版本，Dependabot 没法把它们当成一组一起升 —— 它会单独把
-      # @dcloudio/types 升到 ^3.4.32，而 @dcloudio/uni-app 的 peer 立刻不满足。
-      #
-      # 这不是假想：**第一个 Dependabot PR 就是这么红的**（ERESOLVE，client 的
-      # npm ci 都没跑起来）。升级 uni-app 要人整体来：把所有 @dcloudio/* 换成
-      # 同一个新日期版本，然后跑一遍 make client-check。
-      - dependency-name: "@dcloudio/*"
     commit-message:
       prefix: "前端依赖"
 
