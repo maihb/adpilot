@@ -1,0 +1,13 @@
+/* 后台只需要一点点全局样式：Element Plus 自己带了 reset 和变量。 */
+body {
+  margin: 0;
+  font-family:
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    sans-serif;
+}
+
+#app {
+  height: 100vh;
+}

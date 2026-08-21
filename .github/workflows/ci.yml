@@ -49,7 +49,7 @@ jobs:
         run: uv run pytest --cov=adpilot --cov-report=term-missing
 
   frontend:
-    name: Client types and unit tests
+    name: Frontend types and unit tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -58,7 +58,11 @@ jobs:
         with:
           node-version: "22"
           cache: npm
-          cache-dependency-path: client/package-lock.json
+          # 两个前端各有各的 lock —— 它们**刻意不共用依赖**（运行时不同，见
+          # docs/design/2026-08-21-admin-console.md 第二节）。
+          cache-dependency-path: |
+            client/package-lock.json
+            admin/package-lock.json
 
       - name: Install uv
         uses: astral-sh/setup-uv@v4
@@ -74,22 +78,32 @@ jobs:
       - name: Install client dependencies
         run: npm --prefix client ci
 
+      - name: Install admin dependencies
+        run: npm --prefix admin ci
+
       - name: Regenerate API types from the backend
         run: make openapi
 
       # 🔴 这一条是前端唯一的契约门禁：后端改了出参形状而没同步前端类型，这里红。
       # 前端不做 E2E（设计文档第八节），所以「契约还对不对」只剩这一处机器保证。
-      - name: Client types are in sync with the backend
-        run: git diff --exit-code client/src/api/generated
+      # 两个前端一起查 —— 各生成各的，漏掉哪个都等于那半边没人管。
+      - name: Frontend types are in sync with the backend
+        run: git diff --exit-code client/src/api/generated admin/src/api/generated
 
-      # 上一步保证类型是新的，这一步保证页面确实按新类型写。
-      - name: Type check
+      # 上一步保证类型是新的，这两步保证页面确实按新类型写。
+      - name: Type check (client)
         run: npm --prefix client run type-check
+
+      - name: Type check (admin)
+        run: npm --prefix admin run type-check
 
       # 只测那几个「算错了不会报错」的纯函数（金额的 null 三态、时间线缺口、
       # 票的有效期判定）。页面渲染不测。
-      - name: Unit tests
+      - name: Unit tests (client)
         run: npm --prefix client test
+
+      - name: Unit tests (admin)
+        run: npm --prefix admin test
 
   integration:
     name: Integration tests

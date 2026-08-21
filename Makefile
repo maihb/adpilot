@@ -26,7 +26,7 @@ COMPOSE ?= docker compose
 
 .DEFAULT_GOAL := help
 
-.PHONY: help bootstrap env setup dev worker beat seed lint fmt types imports test test-int check migrate revision up rebuild down logs ps openapi client client-check
+.PHONY: help bootstrap env setup dev worker beat seed lint fmt types imports test test-int check migrate revision up rebuild down logs ps openapi client admin client-check
 
 help: ## 显示这份清单
 	@awk 'BEGIN {FS = ":.*##"} \
@@ -129,20 +129,32 @@ check: lint types imports test ## 推送前跑这条：CI 卡的五道门禁，�
 # 有两个问题：它要连数据库（lifespan 会开连接池），而且那个路由在生产环境本来就是
 # 关掉的（main.py 里 openapi_url=None）。离线这条不触发 lifespan、也不读那个路由，
 # 于是不需要任何依赖、任何凭据。
-openapi: ## 导出 openapi.json 并重新生成前端 TS 类型
+# 两个前端各生成一份。**不共用生成物**：客户端只需要 /api/portal/* 那几个 schema、
+# 后台需要其余全部，而 openapi-typescript 不做按路径裁剪，于是两份内容高度重合。
+# 接受这个重复 —— 替代方案是在生成链里塞一个只有我们自己懂的裁剪步骤，它一旦出错，
+# 症状是「类型对不上但说不清为什么」。
+openapi: ## 导出 openapi.json 并重新生成两个前端的 TS 类型
 	$(UV) run python -c "import json,sys; from adpilot.main import create_app; json.dump(create_app().openapi(), sys.stdout, ensure_ascii=False)" > client/openapi.json
+	cp client/openapi.json admin/openapi.json
 	npm --prefix client run gen:api
+	npm --prefix admin run gen:api
 
 # H5 走 vite 的 dev proxy 连后端（见 client/vite.config.ts），所以要先 make dev。
 # 微信小程序端是 npm --prefix client run dev:mp-weixin，产物用微信开发者工具打开。
 client: ## 起客户端 H5 开发服务器（先 make up + make dev）
 	npm --prefix client run dev:h5
 
+# 端口 5174，客户端占着 5173 —— 两个前端要能同时跑。
+admin: ## 起内部后台开发服务器（先 make up + make dev）
+	npm --prefix admin run dev
+
 # 客户端那两道门禁。type-check 吃的是上面生成的类型，所以后端改了形状而没跑
 # make openapi 的话，会在这里表现成「前端用了不存在的字段」。
-client-check: ## 客户端门禁：vue-tsc + 纯函数单测
+client-check: ## 两个前端的门禁：vue-tsc + 纯函数单测
 	npm --prefix client run type-check
 	npm --prefix client test
+	npm --prefix admin run type-check
+	npm --prefix admin test
 
 ##@ 数据库迁移
 

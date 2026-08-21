@@ -162,6 +162,24 @@ For WeChat Mini Program, run `npm --prefix client run build:mp-weixin` and impor
 which is why H5 is the default demo path — evaluating this project should not start
 with registering a Mini Program account.
 
+### Admin console
+
+The operator's own console: imports, alerts, clients and invite codes, account detail.
+
+```bash
+npm --prefix admin install
+make admin         # http://localhost:5174 (the client app holds 5173; both can run)
+```
+
+Log in with the operator credentials from `.env`. Tokens last 8 hours and **do not
+slide** — this side has far more power than the client app.
+
+⚠️ **The console is not meant to face the public internet.** This version ships no
+network-level isolation (nginx rules, IP allowlists, VPNs are all deployment-shaped
+concerns): **its only defence is the operator password plus an 8-hour token.** Where
+you put it, and whether it sits behind a private network, is your call — this is
+written down so it does not become a silent assumption.
+
 The sample data is 3 clients and 4 ad accounts with 28 days of daily metrics,
 spanning Meta / TikTok, three currencies and three time zones. It **only adds,
 never overwrites**, so re-running is safe; it refuses to run when
@@ -206,8 +224,9 @@ make seed         # load anonymised sample data (run make migrate first)
 make revision m='add column xxx'   # draft a migration after editing models/ — **review it before committing**
 make test-int     # integration tests, needs the `make up` stack + `make migrate` first
 make client       # client H5 dev server (backend must be running via make dev)
-make client-check # client gates: vue-tsc + the three pure-function test files
-make openapi      # run after changing backend response shapes: regenerate TS types
+make admin        # admin console dev server (same, on port 5174)
+make client-check # both frontends: vue-tsc + the pure-function test files
+make openapi      # run after changing backend response shapes: regenerate both frontends' TS types
                   #   skip it and CI's frontend job goes red (types drift from the API)
 make up / rebuild / down / logs   # rebuild = rebuild the image after a code change
 ```
@@ -239,7 +258,7 @@ that is merely recommended rots; if it matters here, it fails the build.
 | D6–D8 | Celery + RabbitMQ, Mongo snapshots, rule engine | Tasks run async with retries; balance alert fires | ✅ |
 | D9 | Authentication, authorisation scope, invite codes | Someone else's token cannot reach my data, and a test says so | ✅ |
 | D10–D11 | uni-app client | H5 running; Mini Program compiles, runtime needs your own DevTools | ✅ |
-| D12 | Vue 3 admin console | Client management, imports and invite codes usable from the UI | ⬜ |
+| D12 | Vue 3 admin console | Client management, imports and invite codes usable from the UI | ✅ |
 | D13–D14 | LLM reports and diagnosis | Report carries the one line of plain English that matters | ⬜ |
 | D15 | Docs, screenshots, deploy | A stranger can run it within five minutes | ⬜ |
 

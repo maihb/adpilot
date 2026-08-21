@@ -70,7 +70,11 @@ client/             uni-app 客户端（H5 + 微信小程序）。**不进分层
                       git diff --exit-code 判后端改了形状而前端没跟上
   src/api/request.ts  唯一的请求出口：认证头、并发上限、401 续期只在这里
   src/utils/          🔴 仅有的两个允许做数字转换的地方（decimal / series）。
-                      页面里禁止 Number( —— tests/test_client_source.py 盯着
+                      页面里禁止 Number( —— tests/test_frontend_source.py 盯着
+admin/              Vue 3 + Element Plus 内部操作台。**和 client/ 不共用代码** ——
+                    运行时不同（fetch vs uni.request），契约本来也要独立
+  src/api/generated/  同上，由 make openapi 一并生成，**进 git**
+  src/api/request.ts  唯一请求出口：401 之后就地弹登录框，**只重放 GET**
 ```
 
 **为什么按技术职责分目录，不按业务领域分。** 这套代码的业务实体（客户、账户、

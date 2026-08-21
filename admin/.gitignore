@@ -1,0 +1,32 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# 从后端导出的中间产物（`make openapi` 生成）。
+#
+# ⚠️ src/api/generated/ 下那份 .ts **要进 git** —— CI 拿 git diff --exit-code 判
+# 后端有没有改过出参形状而前端没跟上，不进 git 就无从比起。
+# auto-imports.d.ts / components.d.ts 同理：type-check 依赖它们，不进 git 的话
+# CI 里第一步就红。
+openapi.json

@@ -26,6 +26,7 @@
 | **内部后台怎么摆、写操作分几级**（D12） | [`docs/design/2026-08-21-admin-console.md`](docs/design/2026-08-21-admin-console.md) |
 | **加一个要认证的接口 / 客户端接口** | [`docs/business/auth.md`](docs/business/auth.md) + [`docs/business/portal.md`](docs/business/portal.md) |
 | **改客户端界面 / 加一屏**（四条显示口径规则） | [`docs/business/client-app.md`](docs/business/client-app.md) |
+| **改内部后台 / 加一屏**（写操作分三级） | [`docs/business/admin.md`](docs/business/admin.md) |
 | **代码摆在哪、依赖往哪个方向走** | [`docs/code-rules/architecture.md`](docs/code-rules/architecture.md) |
 | 金额 / 时区 / 类型 / 异步 / 测试 / 日志 / 配置密钥 / **改完必做清单** | [`docs/code-rules/conventions.md`](docs/code-rules/conventions.md) |
 | **加一个接口**（含可照抄的四步与踩坑速查） | [`docs/code-rules/api.md`](docs/code-rules/api.md) |
@@ -96,7 +97,7 @@
 | **客户端路由不许漏掉作用域** | 同上那个文件：`/api/portal/` 下的每个接口都必须要 `ClientBearer`，且**不许接受任何形式的 `client_id` 入参** —— 它只能来自 token。这只是第一层；第二层是 `services/` 里 `client_id` 必填关键字参数，让「查全部客户」在那条路径上根本写不出来 |
 | **签名比对不许写成 `==`** | `tests/test_auth_token.py` 最后一条**扫源码**：`verify` 里必须有 `compare_digest`，且验签必须排在解析和过期判定之前。这三件事没有可观察的行为差异，测不出来，只能盯代码形状 |
 | **前端类型不许和后端脱节** | CI 的 `frontend` job：`make openapi` 重新生成一遍再 `git diff --exit-code`。生成的 `.ts` **进 git** 正是为了让它比得出来；分仓的话这条只能靠人盯 |
-| **页面里不许把字符串转成数字** | `tests/test_client_source.py` 扫源码：后端的金额和比率下发的**永远是字符串**，而 `Number(null) === 0` —— 一个 `Number()` 就把「算不出来」显示成「还能撑 0 天」，于是每个暂停投放的账户都在客户屏幕上着火。转换只许发生在 `client/src/utils/` 里。同一个文件还盯着 `uni.request` 只走唯一出口 |
+| **页面里不许把字符串转成数字** | `tests/test_frontend_source.py` 扫源码：后端的金额和比率下发的**永远是字符串**，而 `Number(null) === 0` —— 一个 `Number()` 就把「算不出来」显示成「还能撑 0 天」，于是每个暂停投放的账户都在客户屏幕上着火。转换只许发生在两个前端各自的 `src/utils/` 里。同一个文件还盯着网络调用只走唯一出口（客户端 `uni.request`、后台 `fetch`）、模板里不许写 markdown 的 `**`、以及告警类型的中文名和后端 `AlertKind` 双向对齐 |
 | **示例邀请码不许写死** | `tests/test_seed.py`：seed 两次发出的码必须不同。写死一个「demo 码」等于往公开仓库里放一把人人皆知的钥匙 |
 | 数据卷不被顺手删掉 | 守卫拦下 `docker compose down -v` |
 | **push 要人明确说** | `settings.json` 里 `Bash(git push:*)` 是 deny。用户说「提交」只意味着 commit |

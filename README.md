@@ -141,6 +141,22 @@ make client        # 起 H5 开发服务器（默认 http://localhost:5173）
 导入 `client/dist/build/mp-weixin`。**它需要你自己的 AppID**，所以 H5 是默认的
 演示路径 —— 评估这个项目不该先要求你去注册一个小程序账号。
 
+### 内部后台
+
+运营自己的操作台：导入、告警、客户与邀请码、账户明细。
+
+```bash
+npm --prefix admin install
+make admin         # http://localhost:5174（客户端占着 5173，两个能同时跑）
+```
+
+用 `.env` 里那对运营账号密码登录。票 8 小时，**不滑动续期** —— 后台的权限比客户端
+大得多。
+
+⚠️ **后台不该暴露在公网。** 这一版没有网络层隔离（nginx 规则、IP 白名单、VPN 都是
+部署形态的事），**它唯一的防线是运营的账号密码 + 8 小时的票**。放到哪台机器上、
+要不要挡在内网后面，是部署者的决定 —— 这句话写在这里是为了不让它成为一个默认假设。
+
 示例数据是 3 个客户、4 个广告账户、28 天日指标，跨 Meta / TikTok、跨三种币种与三个
 时区。它**只添不改**，重复跑安全；`ENVIRONMENT=prod` 时直接拒绝执行。
 
@@ -179,8 +195,9 @@ make seed         # 灌脱敏示例数据（先 make migrate）
 make revision m='加一列 xxx'   # 改完 models/ 生成迁移草稿，**要人看一遍再提交**
 make test-int     # 集成测试，需要 make up 那套环境 + 先 make migrate
 make client       # 起客户端 H5 开发服务器（后端要先 make dev 跑着）
-make client-check # 客户端门禁：vue-tsc + 三个纯函数的单测
-make openapi      # 改了后端出参形状之后跑它：重新生成前端 TS 类型
+make admin        # 起内部后台开发服务器（同上，端口 5174）
+make client-check # 两个前端的门禁：vue-tsc + 纯函数单测
+make openapi      # 改了后端出参形状之后跑它：重新生成两个前端的 TS 类型
                   #   不跑的话 CI 的 frontend job 会红（类型和后端对不上）
 make up / rebuild / down / logs   # rebuild = 改了代码之后重建镜像再换上去
 ```
@@ -211,7 +228,7 @@ make 只是短名字，没有额外逻辑 —— 每个 target 展开成什么�
 | D6–D8 | Celery + RabbitMQ、Mongo 快照、规则引擎 | 任务异步执行且能重试，余额告警能触发 | ✅ |
 | D9 | 认证、授权作用域、邀请码 | 拿别人的 token 查不到我的数据，且有测试盯着 | ✅ |
 | D10–D11 | uni-app 客户端 | H5 端可用；小程序端编译通过，运行时需自备开发者工具 | ✅ |
-| D12 | Vue 3 内部后台 | 客户管理、导入、邀请码生成能在页面上走完 | ⬜ |
+| D12 | Vue 3 内部后台 | 客户管理、导入、邀请码生成能在页面上走完 | ✅ |
 | D13–D14 | LLM 日报与诊断 | 日报里有那一行说人话的结论 | ⬜ |
 | D15 | 文档、截图、部署 | 陌生人能在五分钟内跑起来 | ⬜ |
 

@@ -32,6 +32,7 @@
 | [glossary](glossary.md) | — | 术语、指标口径、时区、回填与重述、规则公式 | `rules/` | ✅ 口径已定；余额那两个参数已按倾向值实现，仍待业务定论 |
 | [认证与作用域](auth.md) | `auth` | 两种身份、token 的签发与校验、运营登录、有效期与续期 | `auth/` `api/auth.py` `api/deps.py` | ✅ D9：内部接口已全部要认证；客户端那半边随 `portal` 一起 |
 | [客户自助端](portal.md) | `portal` | 客户看自己：账户、时间线、余额可撑天数、告警。**全只读，作用域锁死** | `api/portal.py` `schemas/portal.py` `services/*_for_client` | ✅ D9：接口已通；uni-app 前端 D10–D11 |
+| [内部操作台](admin.md) | — | 运营的五屏、写操作的三级分类、邀请码只显示一次、导入的两段 | `admin/src/` | ✅ D12：登录、导入、告警、客户与邀请码、账户明细已通 |
 | [客户端界面](client-app.md) | — | 客户在手机上看到的四屏、以及「显示错了不会报错」的四条口径规则 | `client/src/` | ✅ D10–D11：H5 已跑通；微信小程序端只验到编译通过 |
 | [客户与账户](clients.md) | `clients` | 客户、广告账户（平台/币种/**时区**）、账户与客户的归属 | `client.py` `ad_account.py`（model / schema / service / api 四层同名） | ✅ D3：建、查、改与分页已落地，无删除 |
 | [数据接入](imports.md) | `imports` | `ReportProvider` 适配器注册表、文件导入、原始快照落盘 | `providers/` `services/imports.py` | ✅ D3：CSV 导入与 append-only 落盘已通，Excel 与拉取调度未做 |

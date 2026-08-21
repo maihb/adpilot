@@ -1,0 +1,142 @@
+/**
+ * 内部接口的薄封装。**类型全部从 `generated/schema.ts` 取**，一个都不手写 ——
+ * 后端改了出参形状这里就编译不过，那是这个后台唯一的契约门禁。
+ */
+
+import type { components } from './generated/schema'
+import { request } from './request'
+
+type Schemas = components['schemas']
+
+export type Client = Schemas['ClientResponse']
+export type AdAccount = Schemas['AdAccountResponse']
+export type Invite = Schemas['InviteResponse']
+export type InviteCreated = Schemas['InviteCreatedResponse']
+export type DailyMetric = Schemas['DailyMetricItem']
+export type Alert = Schemas['AlertItem']
+export type Balance = Schemas['BalanceItem']
+export type ImportResult = Schemas['ImportResponse']
+export type TaskStatus = Schemas['TaskStatusResponse']
+
+// —— 认证 ————————————————————————————————————————————————
+
+export function login(username: string, password: string): Promise<Schemas['TokenResponse']> {
+  return request<Schemas['TokenResponse']>('/auth/login', {
+    method: 'POST',
+    body: { username, password },
+    auth: false,
+  })
+}
+
+// —— 客户与账户 ————————————————————————————————————————————
+
+export function listClients(page = 1, pageSize = 50): Promise<Schemas['ClientListResponse']> {
+  return request<Schemas['ClientListResponse']>('/clients', {
+    query: { page, page_size: pageSize },
+  })
+}
+
+export function getClient(clientId: number): Promise<Client> {
+  return request<Client>(`/clients/${clientId}`)
+}
+
+export function createClient(name: string, note?: string): Promise<Client> {
+  return request<Client>('/clients', { method: 'POST', body: { name, note: note || null } })
+}
+
+/**
+ * 改客户。
+ *
+ * 🔴 `is_active: false` 是**立刻影响外部人**的操作：`require_client_scope` 每次
+ * 请求都查一遍它，所以那个客户手上还没过期的票**当场失效**。调用它的地方必须先
+ * 二次确认，且确认文案要写出这个后果。
+ */
+export function updateClient(
+  clientId: number,
+  patch: Schemas['ClientUpdateRequest'],
+): Promise<Client> {
+  return request<Client>(`/clients/${clientId}`, { method: 'PATCH', body: patch })
+}
+
+export function listAdAccounts(clientId?: number): Promise<Schemas['AdAccountListResponse']> {
+  return request<Schemas['AdAccountListResponse']>('/ad-accounts', {
+    query: { client_id: clientId, page: 1, page_size: 100 },
+  })
+}
+
+export function getAdAccount(accountId: number): Promise<AdAccount> {
+  return request<AdAccount>(`/ad-accounts/${accountId}`)
+}
+
+// —— 邀请码 ——————————————————————————————————————————————
+
+export function listInvites(clientId: number): Promise<Schemas['InviteListResponse']> {
+  return request<Schemas['InviteListResponse']>(`/clients/${clientId}/invites`)
+}
+
+/**
+ * 发一个邀请码。
+ *
+ * 🔴 **返回值里的 `code` 是明文码唯一一次出现的地方** —— 库里存的是哈希，列表
+ * 接口只有状态。调用方必须把它留在界面上直到人主动关掉，不能做成一闪而过的
+ * toast。
+ */
+export function createInvite(clientId: number, ttlDays: number): Promise<InviteCreated> {
+  return request<InviteCreated>(`/clients/${clientId}/invites`, {
+    method: 'POST',
+    body: { ttl_days: ttlDays },
+  })
+}
+
+export function revokeInvite(clientId: number, inviteId: number): Promise<Invite> {
+  return request<Invite>(`/clients/${clientId}/invites/${inviteId}/revoke`, { method: 'POST' })
+}
+
+// —— 导入与归一化 ————————————————————————————————————————
+
+export function importReport(form: FormData): Promise<ImportResult> {
+  return request<ImportResult>('/imports', { method: 'POST', form })
+}
+
+export function getTask(taskId: string): Promise<TaskStatus> {
+  return request<TaskStatus>(`/tasks/${taskId}`)
+}
+
+export function normalizeAccount(accountId: number): Promise<Schemas['NormalizeResponse']> {
+  return request<Schemas['NormalizeResponse']>(`/ad-accounts/${accountId}/normalize`, {
+    method: 'POST',
+  })
+}
+
+// —— 指标、余额、告警 ————————————————————————————————————
+
+export function listDailyMetrics(
+  accountId: number,
+  start: string,
+  end: string,
+): Promise<Schemas['DailyMetricListResponse']> {
+  return request<Schemas['DailyMetricListResponse']>(`/ad-accounts/${accountId}/daily-metrics`, {
+    query: { start, end, page: 1, page_size: 100 },
+  })
+}
+
+export function listBalances(accountId: number): Promise<Schemas['BalanceListResponse']> {
+  return request<Schemas['BalanceListResponse']>(`/ad-accounts/${accountId}/balances`)
+}
+
+export function recordBalance(
+  accountId: number,
+  body: Schemas['BalanceCreateRequest'],
+): Promise<Balance> {
+  return request<Balance>(`/ad-accounts/${accountId}/balances`, { method: 'POST', body })
+}
+
+export function listAlerts(onlyOpen: boolean): Promise<Schemas['AlertListResponse']> {
+  return request<Schemas['AlertListResponse']>('/alerts', {
+    query: { only_open: onlyOpen, page: 1, page_size: 50 },
+  })
+}
+
+export function sweepAlerts(): Promise<Schemas['SweepResponse']> {
+  return request<Schemas['SweepResponse']>('/alerts/sweep', { method: 'POST' })
+}
