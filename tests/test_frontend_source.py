@@ -46,8 +46,9 @@ _NUMERIC_CAST = re.compile(r"\b(?:Number|parseFloat|parseInt)\s*\(")
 #: 它要连字符串字面量一起解析，那个复杂度换不来什么。
 _COMMENT_LINE = re.compile(r"^\s*(//|/\*|\*|<!--)")
 
-#: 客户端那份告警类型中文名映射。抓 `KIND_NAMES = { ... }` 里的键。
+#: 前端那几份「后端枚举 → 中文名」映射。抓 `const XXX_NAMES = { ... }` 里的键。
 _KIND_BLOCK = re.compile(r"const KIND_NAMES:[^{]*\{(.*?)\n\}", re.DOTALL)
+_STATUS_BLOCK = re.compile(r"const REPORT_STATUS_NAMES:[^{]*\{(.*?)\n\}", re.DOTALL)
 _KIND_KEY = re.compile(r"^\s*(\w+):", re.MULTILINE)
 
 
@@ -204,6 +205,37 @@ def test_alert_kind_names_match_the_backend_enum() -> None:
             )
 
     assert checked, "一份 KIND_NAMES 都没扫到 —— 是不是改名了？改了就把这条测试一起改"
+
+
+def test_report_status_names_match_the_backend_enum() -> None:
+    """日报状态的中文名必须和后端的 `ReportStatus` **双向对齐**。
+
+    和上面那条告警的完全同源：后台那份映射是后端枚举的第二份拷贝，页面对认不出的
+    状态做了回落（显示原始标识），于是**对不上时不会报错**，只会把一个英文标识
+    显示给运营。
+
+    这里比告警那条更要紧一点：日报状态决定了页面显示哪几个按钮（草稿能改能发、
+    已发布只能看），状态名对不上时按钮的显隐仍然按原始值走，而人看到的是另一回事。
+    """
+    from adpilot.models.report import ReportStatus
+
+    backend = {status.value for status in ReportStatus}
+    checked = 0
+
+    for root, _, _ in FRONTENDS:
+        for path in _sources(root, "pages"):
+            block = _STATUS_BLOCK.search(path.read_text(encoding="utf-8"))
+            if block is None:
+                continue
+            checked += 1
+            mapped = set(_KIND_KEY.findall(block.group(1)))
+            assert mapped == backend, (
+                f"{path.relative_to(root.parent)} 的日报状态中文名和后端 ReportStatus 对不上。\n"
+                f"  后端有而前端没给中文名：{sorted(backend - mapped) or '无'}\n"
+                f"  前端有而后端已经没有：{sorted(mapped - backend) or '无'}"
+            )
+
+    assert checked, "一份 REPORT_STATUS_NAMES 都没扫到 —— 是不是改名了？改了就把这条测试一起改"
 
 
 def test_generated_types_are_committed() -> None:

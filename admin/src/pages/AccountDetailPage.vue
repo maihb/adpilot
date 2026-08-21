@@ -12,7 +12,7 @@ import {
   type Balance,
   type DailyMetric,
 } from '../api/endpoints'
-import { NeedsRedo } from '../api/request'
+import { reason } from '../api/request'
 import { formatCount, formatInstant, formatMoney, formatMultiple, formatPercent, toNumber } from '../utils/format'
 
 const route = useRoute()
@@ -69,7 +69,7 @@ async function normalize(): Promise<void> {
     note.value = `归一化完成：写入 ${summary.rows} 行，覆盖 ${summary.days.length} 天，用到 ${summary.snapshots} 条快照。`
     await load()
   } catch (error) {
-    note.value = error instanceof NeedsRedo ? error.message : '归一化失败'
+    note.value = reason(error, '归一化失败')
   } finally {
     busy.value = false
   }
@@ -95,7 +95,7 @@ async function submitBalance(): Promise<void> {
     await load()
     ElMessage.success('余额已录入')
   } catch (error) {
-    ElMessage.error(error instanceof NeedsRedo ? error.message : '录余额失败')
+    ElMessage.error(reason(error, '录余额失败'))
   } finally {
     busy.value = false
   }

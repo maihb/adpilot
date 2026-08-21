@@ -2,7 +2,7 @@
 import { onMounted, ref } from 'vue'
 
 import { createClient, listClients, type Client } from '../api/endpoints'
-import { NeedsRedo } from '../api/request'
+import { reason } from '../api/request'
 import { formatInstant } from '../utils/format'
 
 const items = ref<Client[]>([])
@@ -40,7 +40,7 @@ async function submit(): Promise<void> {
     note.value = ''
     await load()
   } catch (err) {
-    error.value = err instanceof NeedsRedo ? err.message : err instanceof Error ? err.message : '建客户失败'
+    error.value = reason(err, '建客户失败')
   } finally {
     busy.value = false
   }

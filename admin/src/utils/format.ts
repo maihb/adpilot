@@ -96,3 +96,21 @@ export function hoursUntil(iso: string | null | undefined, now: number): number 
   }
   return Math.max(0, (deadline - now) / 3_600_000)
 }
+
+/**
+ * 多行文本 ↔ 字符串数组，给日报的「值得注意」「接下来」两个列表用。
+ *
+ * 一行一条是运营最省事的输入方式（比「点加号新增一项」快得多），代价是要在这里
+ * 把空行滤掉 —— 否则回车两下就会往日报里塞一条空要点，而那一条在客户端会渲染成
+ * 一个孤零零的圆点。
+ */
+export function toLines(text: string): string[] {
+  return text
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+}
+
+export function fromLines(lines: string[] | undefined): string {
+  return (lines ?? []).join('\n')
+}

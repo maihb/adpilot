@@ -2,7 +2,7 @@
 import { onMounted, ref } from 'vue'
 
 import { listAlerts, sweepAlerts, type Alert } from '../api/endpoints'
-import { NeedsRedo } from '../api/request'
+import { reason } from '../api/request'
 import { formatInstant } from '../utils/format'
 
 /**
@@ -49,7 +49,7 @@ async function sweep(): Promise<void> {
     note.value = `巡检了 ${summary.accounts} 个账户：新开 ${summary.opened}，仍成立 ${summary.still_open}，自动收掉 ${summary.resolved}，推送 ${summary.notified}。`
     await load()
   } catch (error) {
-    note.value = error instanceof NeedsRedo ? error.message : '巡检失败'
+    note.value = reason(error, '巡检失败')
   } finally {
     sweeping.value = false
   }

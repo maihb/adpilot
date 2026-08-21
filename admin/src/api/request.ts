@@ -32,6 +32,24 @@ export class NeedsRedo extends Error {
   }
 }
 
+/**
+ * 🔴 **把后端说的那句话原样显示出来**，只有它真的没说话时才用兜底文案。
+ *
+ * 两类错误都要显示 message，但原因不同：`NeedsRedo` 说的是「票过期了、已经重新
+ * 登录、请再点一次」，`ApiError` 的 message 是后端 4xx 里那句 `detail` —— 而这个
+ * 项目的后端**刻意把 detail 写成能指导操作的**（认不出日期列时列出表头、日报发不
+ * 出去时说清缺的是哪一件）。换成一句「操作失败」等于让人去猜，或者来问人。
+ *
+ * 做成共用函数而不是每个页面写一遍 `instanceof`：写漏一个不会报错，只会安静地把
+ * 后端那句话吞掉 —— 而错误分支恰恰是最少被走到、最晚被发现的地方。
+ */
+export function reason(error: unknown, fallback: string): string {
+  if (error instanceof NeedsRedo || error instanceof ApiError) {
+    return error.message
+  }
+  return error instanceof Error ? error.message : fallback
+}
+
 type Method = 'GET' | 'POST' | 'PATCH'
 
 export interface RequestOptions {

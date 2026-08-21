@@ -61,6 +61,7 @@ function go(path: string): void {
       <el-menu :default-active="active" :router="false" @select="go">
         <el-menu-item index="/">导入</el-menu-item>
         <el-menu-item index="/alerts">告警</el-menu-item>
+        <el-menu-item index="/reports">日报</el-menu-item>
         <el-menu-item index="/clients">客户</el-menu-item>
       </el-menu>
     </el-aside>

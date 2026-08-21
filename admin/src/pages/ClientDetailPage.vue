@@ -14,7 +14,7 @@ import {
   type Invite,
   type InviteCreated,
 } from '../api/endpoints'
-import { NeedsRedo } from '../api/request'
+import { reason } from '../api/request'
 import { formatInstant, toNumber } from '../utils/format'
 
 const route = useRoute()
@@ -57,7 +57,7 @@ async function issue(): Promise<void> {
     copied.value = false
     await load()
   } catch (error) {
-    ElMessage.error(error instanceof NeedsRedo ? error.message : '发码失败')
+    ElMessage.error(reason(error, '发码失败'))
   } finally {
     busy.value = false
   }
@@ -97,7 +97,7 @@ async function revoke(invite: Invite): Promise<void> {
     await revokeInvite(clientId, invite.id)
     await load()
   } catch (error) {
-    ElMessage.error(error instanceof NeedsRedo ? error.message : '作废失败')
+    ElMessage.error(reason(error, '作废失败'))
   }
 }
 
@@ -128,7 +128,7 @@ async function toggleActive(): Promise<void> {
     client.value = await updateClient(clientId, { is_active: !disabling })
     ElMessage.success(disabling ? '已停用，该客户的访问已经断掉' : '已恢复合作')
   } catch (error) {
-    ElMessage.error(error instanceof NeedsRedo ? error.message : '改状态失败')
+    ElMessage.error(reason(error, '改状态失败'))
   }
 }
 

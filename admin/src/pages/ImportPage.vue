@@ -10,7 +10,7 @@ import {
   type ImportResult,
   type TaskStatus,
 } from '../api/endpoints'
-import { NeedsRedo } from '../api/request'
+import { reason } from '../api/request'
 
 /** 后端上限，超了回 413。**在选文件时就拦** —— 传完十兆再说不行，那十兆是白传的。 */
 const MAX_BYTES = 10 * 1024 * 1024
@@ -81,13 +81,10 @@ async function submit(): Promise<void> {
     result.value = await importReport(form)
     await followTask(result.value.task_id)
   } catch (error) {
-    if (error instanceof NeedsRedo) {
-      parseError.value = error.message
-    } else {
-      // 🔴 **原样显示后端说了什么。** 认不出日期列时它会把表头列出来，那正是运营
-      // 要拿去改导出设置的信息 —— 换成一句「导入失败」等于让人去猜。
-      parseError.value = error instanceof Error ? error.message : '导入失败'
-    }
+    // 🔴 **原样显示后端说了什么。** 认不出日期列时它会把表头列出来，那正是运营
+    // 要拿去改导出设置的信息 —— 换成一句「导入失败」等于让人去猜。这条规矩收口
+    // 在 api/request.ts 的 reason()，全站一份。
+    parseError.value = reason(error, '导入失败')
   } finally {
     busy.value = false
   }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { NO_VALUE, formatInstant, formatMoney, formatPercent, hoursUntil, toNumber } from './format'
+import { NO_VALUE, formatInstant, formatMoney, formatPercent, fromLines, hoursUntil, toLines, toNumber } from './format'
 
 describe('toNumber', () => {
   it('🔴 null 回 null，绝不回 0', () => {
@@ -61,5 +61,20 @@ describe('hoursUntil', () => {
 
   it('还剩几小时', () => {
     expect(hoursUntil('2026-08-21T08:00:00Z', now)).toBeCloseTo(8, 6)
+  })
+})
+
+describe('toLines / fromLines', () => {
+  it('一行一条，空行滤掉', () => {
+    // 回车两下不该往日报里塞一条空要点 —— 它在客户端会渲染成一个孤零零的圆点
+    expect(toLines('第一条\n\n  第二条  \n')).toEqual(['第一条', '第二条'])
+  })
+
+  it('往返之后内容不变', () => {
+    expect(toLines(fromLines(['甲', '乙']))).toEqual(['甲', '乙'])
+  })
+
+  it('后端没给这个字段时当空处理', () => {
+    expect(fromLines(undefined)).toBe('')
   })
 })

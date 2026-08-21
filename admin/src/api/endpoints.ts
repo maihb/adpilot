@@ -17,6 +17,8 @@ export type Alert = Schemas['AlertItem']
 export type Balance = Schemas['BalanceItem']
 export type ImportResult = Schemas['ImportResponse']
 export type TaskStatus = Schemas['TaskStatusResponse']
+export type Report = Schemas['ReportItem']
+export type ReportNarrative = Schemas['ReportNarrative']
 
 // —— 认证 ————————————————————————————————————————————————
 
@@ -139,4 +141,46 @@ export function listAlerts(onlyOpen: boolean): Promise<Schemas['AlertListRespons
 
 export function sweepAlerts(): Promise<Schemas['SweepResponse']> {
   return request<Schemas['SweepResponse']>('/alerts/sweep', { method: 'POST' })
+}
+
+// —— 日报 ——————————————————————————————————————————————
+//
+// 三个写操作按「能不能收回来」分级（admin.md）：生成和修订都可逆（重新生成、
+// 再改一次），**发布收不回来** —— 客户手上那份不会自己更新，所以它是这三个里
+// 唯一需要二次确认的。
+
+export function listReports(accountId: number): Promise<Schemas['ReportListResponse']> {
+  return request<Schemas['ReportListResponse']>(`/ad-accounts/${accountId}/reports`, {
+    query: { page: 1, page_size: 50 },
+  })
+}
+
+/**
+ * 生成（或重新生成）某一天的日报。
+ *
+ * 数字在这一刻固定下来，此后不随平台回填变化。**已发布的那份会被拒**（409）——
+ * 客户手上那份不会自己更新，库里这份也就不该变。
+ */
+export function generateReport(accountId: number, statDate: string): Promise<Report> {
+  return request<Report>(`/ad-accounts/${accountId}/reports`, {
+    method: 'POST',
+    body: { stat_date: statDate },
+  })
+}
+
+export function getReport(reportId: number): Promise<Report> {
+  return request<Report>(`/reports/${reportId}`)
+}
+
+/** 存下人工修订后的那一版。**`llm_narrative` 不会被动** —— 模型原文永不修改。 */
+export function reviseReport(
+  reportId: number,
+  body: Schemas['ReportReviseRequest'],
+): Promise<Report> {
+  return request<Report>(`/reports/${reportId}`, { method: 'PATCH', body })
+}
+
+/** 发布。两条硬校验在服务端（人工修订过、操作记录非空），不满足返回 409。 */
+export function publishReport(reportId: number): Promise<Report> {
+  return request<Report>(`/reports/${reportId}/publish`, { method: 'POST' })
 }

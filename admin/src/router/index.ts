@@ -15,6 +15,8 @@ const routes: RouteRecordRaw[] = [
   // 一屏 —— 藏在两层菜单后面，人就会退回去用 Excel。
   { path: '/', name: 'import', component: () => import('../pages/ImportPage.vue') },
   { path: '/alerts', name: 'alerts', component: () => import('../pages/AlertsPage.vue') },
+  // 日报排在告警之后：运营的一天是「导入 → 看告警 → 出日报」。
+  { path: '/reports', name: 'reports', component: () => import('../pages/ReportsPage.vue') },
   { path: '/clients', name: 'clients', component: () => import('../pages/ClientsPage.vue') },
   {
     path: '/clients/:id',
