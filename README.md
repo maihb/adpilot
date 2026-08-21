@@ -79,7 +79,8 @@ flowchart TB
 
 ## 快速开始
 
-需要 Docker 与 Docker Compose。
+需要 Docker 与 Docker Compose。下面的例子还用到 `curl` 和 `jq`（只是为了少写几行，
+换成别的取值方式一样）。
 
 ```bash
 git clone https://github.com/maihb/adpilot.git
@@ -92,9 +93,12 @@ openssl rand -base64 24
 
 # 认证也要两样东西（D9 起接口全部要登录）：
 openssl rand -base64 32                        # → 填进 AUTH_SECRET
-uv run python -m adpilot.auth.password         # 交互式输入密码，把它打印的那行
-                                               #   OPERATOR_PASSWORD_HASH='...' 整行贴进 .env
-                                               #   **单引号不能省**，哈希里的 $ 会被 compose 展开
+
+# 运营密码存哈希不存明文。--no-deps 让它不必等数据库先健康 —— 这一步本来就跑在
+# 填完密码之前。把它打印的那行 OPERATOR_PASSWORD_HASH='...' 整行贴进 .env，
+# **单引号不能省**：哈希里的 $ 会被 compose 当变量展开，症状是「本机登录得了、
+# compose 起的那套登录不了」。
+docker compose run --rm --no-deps api python -m adpilot.auth.password
 
 docker compose up -d
 
@@ -124,10 +128,20 @@ curl -H "Authorization: Bearer $TOKEN" localhost:8000/api/clients
 ```
 
 客户那一侧走**邀请码**：运营给某个客户生成一个码，渲染成二维码发出去，客户扫了就
-换到一张 7 天的票，之后只能看自己的数据（`/api/portal/*`，全只读）。`make seed`
-跑完会给**每个**示例客户各打印一个码。
+换到一张 7 天的票，之后只能看自己的数据（`/api/portal/*`，全只读）。上面那条 seed
+命令跑完会给**每个**示例客户各打印一个码 —— 每次跑都是新的，且只显示这一次。
 
 ### 客户端（H5）
+
+<p align="center">
+  <img src="docs/images/client-report.png" alt="客户端的日报详情" width="300">
+  <img src="docs/images/client-dashboard.png" alt="客户端的投放看板" width="300">
+</p>
+
+左边是客户收到的日报：那段话经运营确认才发出来，数字是生成那一刻定死的；「本期做了
+什么」带着**为什么这么调** —— 平台的变更日志给不出那一句。右边是看板，余额告急标红，
+而「算不出来」显示成 `—` 不是 0（[口径规则](docs/business/client-app.md)）。
+
 
 客户看到的那四屏。它走 vite 的 dev proxy 连后端，所以后端要先跑着：
 
@@ -136,7 +150,7 @@ npm --prefix client install
 make client        # 起 H5 开发服务器（默认 http://localhost:5173）
 ```
 
-打开之后把 `make seed` 打印的任意一个邀请码粘进去。三个示例客户各演示一种情况，
+打开之后把 seed 打印的任意一个邀请码粘进去。三个示例客户各演示一种情况，
 其中「示例｜户外装备」的账户已暂停投放 —— 用它可以看到**「近期无消耗」而不是
 「还能撑 0 天」**，那是这套界面里最容易写错的一条边界。
 
@@ -146,7 +160,15 @@ make client        # 起 H5 开发服务器（默认 http://localhost:5173）
 
 ### 内部后台
 
-运营自己的操作台：导入、告警、客户与邀请码、账户明细。
+运营自己的操作台：导入、告警、**日报**、客户与邀请码、账户明细。
+
+<p align="center">
+  <img src="docs/images/admin-report.png" alt="内部后台的日报修订与发布" width="760">
+</p>
+
+日报这一屏是那道**人工闸门**所在：模型的初稿只读（永不修改），运营改完自己那一版才
+发得出去 —— 未经修订的、以及「本期做了什么」为空的，服务端直接拒。截图里这份没有
+模型初稿，因为示例数据不调用 LLM（见下）。
 
 ```bash
 npm --prefix admin install
@@ -214,6 +236,73 @@ make 只是短名字，没有额外逻辑 —— 每个 target 展开成什么�
 便知。`make check` 的四道门禁与 [CI](.github/workflows/ci.yml) 同序同命令：只写在
 文档里、没有机器执行的检查一定会腐化；在这个仓库里，重要的事就得能让构建失败。
 
+## 部署到一台服务器
+
+⚠️ **这一节是约束清单，不是一套验证过的部署方案。** 作者只在本机的 compose 上跑过
+（CI 也一样），所以下面写的是「不这么做会出事」的已知项，而不是「照着做就行」的
+教程。反向代理怎么配、证书怎么签，各家机器不一样，这里不假装知道。
+
+### 上线前必须改的三件事
+
+| 改什么 | 不改会怎样 |
+|---|---|
+| `ENVIRONMENT=prod` | 少一组护栏：`/docs` 和 `/openapi.json` 仍然对外开着（一个免认证、能枚举全部路由与出入参的入口）、`AUTH_SECRET` 和运营密码哈希缺了也照样启动、`seed` 还能往生产库里灌示例数据 |
+| 所有密码重新生成（`openssl rand -base64 24`） | `.env.example` 里那几行是**空的**，但你本机 `.env` 里那套多半是随手写的 |
+| `AUTH_SECRET` 至少 32 字符（`openssl rand -base64 32`） | token 的 payload 是公开可读的，攻击者手里天然有一对（明文, 签名）—— 密钥短了就是离线爆破的活靶子。`prod` 下这一条会被强制 |
+
+### 🔴 端口：compose 默认把四个后端服务都映射到宿主机
+
+`docker-compose.yml` 里 PostgreSQL、MongoDB、Redis、RabbitMQ（含 15672 管理台）
+**都有 `ports:`**。那是给本机开发准备的（`.env.example` 里写着 `*_PORT` 有两个用途：
+宿主机映射，以及本机直接跑时应用连的端口）。
+
+放到一台有公网 IP 的机器上，这等于**把四个数据服务连同 RabbitMQ 管理台一起暴露出
+去** —— 而它们的密码就在同一个 `.env` 里。
+
+**至少要做一件**：用一个 compose 覆盖文件（`-f docker-compose.yml -f
+docker-compose.prod.yml`）把那几段 `ports` 去掉，只留 API 那一个；或者用防火墙只放
+API 的端口。容器之间走服务名通信，删掉映射不影响它们互相连。
+
+### 两个前端是静态产物，需要一个地方放
+
+```bash
+npm --prefix admin run build      # → admin/dist
+npm --prefix client run build:h5  # → client/dist/build/h5
+```
+
+两份产物各自扔给 nginx（或任何静态服务），并把 `/api` 反代到后端。开发时那两个
+`/api` 是 vite 的 dev proxy 转的，生产上没有 vite —— 这一步漏了的表现是「页面打得
+开，一点就 404」。
+
+⚠️ **后台和客户端不要放在同一个域名下**，或者至少别让后台被搜到：它没有网络层隔离，
+唯一的防线是运营的账号密码 + 8 小时的票（上面「内部后台」那节写了这件事）。
+
+### HTTPS 不是可选的
+
+微信里打开 H5 要 HTTPS；小程序更严格 —— 请求域名必须是 HTTPS 且已备案，这一条是
+平台强制的，和这个项目无关。
+
+### 升级：**迁移不会自动跑**
+
+```bash
+git pull
+docker compose up -d --build          # 认的是「容器在不在跑」，不是「镜像新不新」
+docker compose run --rm api alembic upgrade head
+```
+
+第三条单独一步是刻意的（同「快速开始」里建表那步）：改库是会出事的动作，藏在
+`up` 后面就等于看不见它执行了什么。**跳过它的表现是接口开始报未知列**。
+
+### 备份两个库，它们的意义不一样
+
+| 库 | 存什么 | 丢了会怎样 |
+|---|---|---|
+| PostgreSQL | 客户、账户、日指标、余额、操作记录、**已发布的日报** | 全没了。日报是已经发给客户的东西，重建不出来 |
+| MongoDB | `raw_reports` 原始快照，append-only | 归一化结果还在，但「当时平台给的到底是什么数」再也查不到，也没法拿它重跑归一化 |
+
+Redis（缓存 + 任务结果）和 RabbitMQ（队列）**不需要备份** —— 前者丢了自己会长回来，
+后者里只有还没处理完的消息。
+
 ## 技术栈
 
 | 层 | 选型 | 为什么是它 |
@@ -239,7 +328,7 @@ make 只是短名字，没有额外逻辑 —— 每个 target 展开成什么�
 | D12 | Vue 3 内部后台 | 客户管理、导入、邀请码生成能在页面上走完 | ✅ |
 | D13 | LLM 层、调用成本、操作记录 | 假 provider 下走通「结构化输入 → 校验 → 落 `llm_calls`」；操作记录能建能查 | ✅ |
 | D14 | 日报生成 / 修订 / 发布、异常诊断 | 日报里有那一行说人话的结论，且未经人工修订的发不出去 | ✅ |
-| D15 | 文档、截图、部署 | 陌生人能在五分钟内跑起来 | ⬜ |
+| D15 | 文档、截图、部署 | 陌生人能在五分钟内跑起来 | ✅ |
 
 **v1 刻意不做：** 不接 Ads API（适配器接口已预留 —— 平台应用审核比这个里程碑还长）、
 不做多租户 SaaS、不做自动改预算、不做素材管理、不做用户管理（运营账号从环境变量来，

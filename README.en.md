@@ -93,7 +93,8 @@ Every LLM call records token counts and estimated cost.
 
 ## Quick start
 
-Requires Docker and Docker Compose.
+Requires Docker and Docker Compose. The examples below also use `curl` and `jq`
+(only to save a few lines — any other way of reading the token works too).
 
 ```bash
 git clone https://github.com/maihb/adpilot.git
@@ -106,10 +107,13 @@ openssl rand -base64 24
 
 # Authentication needs two more things (every endpoint requires a login as of D9):
 openssl rand -base64 32                        # → put this in AUTH_SECRET
-uv run python -m adpilot.auth.password         # prompts for a password, then prints
-                                               #   OPERATOR_PASSWORD_HASH='...' — paste that
-                                               #   whole line, **keep the single quotes**:
-                                               #   compose expands the $ in the hash otherwise
+
+# The operator password is stored as a hash, never in plaintext. --no-deps means it
+# does not wait for the databases to become healthy — this step runs before you have
+# even filled their passwords in. Paste the whole OPERATOR_PASSWORD_HASH='...' line it
+# prints into .env and **keep the single quotes**: compose would otherwise expand the
+# $ inside the hash, and the symptom is "login works locally but not under compose".
+docker compose run --rm --no-deps api python -m adpilot.auth.password
 
 docker compose up -d
 
@@ -143,10 +147,21 @@ curl -H "Authorization: Bearer $TOKEN" localhost:8000/api/clients
 
 Clients get in through an **invite code**: an operator generates one, renders it as
 a QR code, and the client scans it to receive a 7-day token that can only read
-their own data (`/api/portal/*`, read-only). `make seed` prints one code for
+their own data (`/api/portal/*`, read-only). The seed command above prints one code for
 **each** sample client when it finishes.
 
 ### Client app (H5)
+
+<p align="center">
+  <img src="docs/images/client-report.png" alt="Daily report in the client app" width="300">
+  <img src="docs/images/client-dashboard.png" alt="Client dashboard" width="300">
+</p>
+
+On the left, the report a client receives: the prose only goes out after an
+operator has edited it, and the numbers were frozen when it was generated. "What
+we did today" carries **why** each change was made — a platform's change log
+cannot give you that. On the right, the dashboard: a low balance is red, and
+"cannot be computed" shows as `—`, never 0 ([display rules](docs/business/client-app.md)).
 
 The four screens your clients see. It reaches the backend through vite's dev proxy,
 so the backend has to be running:
@@ -156,7 +171,7 @@ npm --prefix client install
 make client        # H5 dev server, http://localhost:5173 by default
 ```
 
-Paste any of the invite codes `make seed` printed. The three sample clients each
+Paste any of the invite codes the seed command printed. The three sample clients each
 demonstrate a different situation; the accounts under "示例｜户外装备" are paused,
 so that one shows **"no recent spend" rather than "0 days left"** — the edge case
 this UI is easiest to get wrong.
@@ -168,7 +183,18 @@ with registering a Mini Program account.
 
 ### Admin console
 
-The operator's own console: imports, alerts, clients and invite codes, account detail.
+The operator's own console: imports, alerts, **daily reports**, clients and invite
+codes, account detail.
+
+<p align="center">
+  <img src="docs/images/admin-report.png" alt="Editing and publishing a report in the admin console" width="760">
+</p>
+
+This screen is where the **human gate** lives: the model's draft is read-only (it
+is never overwritten), and an operator has to write their own version before
+anything can go out — the server rejects a report that has not been revised, or
+one whose "what we did today" is empty. The report in this screenshot has no model
+draft because the sample data never calls an LLM (see below).
 
 ```bash
 npm --prefix admin install
@@ -246,6 +272,83 @@ expands to. The four gates in `make check` match
 [CI](.github/workflows/ci.yml) command for command, in the same order: a check
 that is merely recommended rots; if it matters here, it fails the build.
 
+## Deploying to a server
+
+⚠️ **This section is a list of constraints, not a deployment recipe that has been
+verified.** The author has only ever run this on a local compose stack (and CI),
+so what follows is "things that will bite you if you skip them", not "do this and
+it works". How to configure a reverse proxy or issue certificates depends on your
+machine; this does not pretend to know.
+
+### Three things you must change before going live
+
+| Change | What happens if you don't |
+|---|---|
+| `ENVIRONMENT=prod` | You lose a set of guardrails: `/docs` and `/openapi.json` stay open (an unauthenticated endpoint that enumerates every route and payload shape), the app starts even without `AUTH_SECRET` or an operator password hash, and `seed` will happily write sample data into your production database |
+| Regenerate every password (`openssl rand -base64 24`) | The lines in `.env.example` are **empty**, but whatever you put in your local `.env` was probably typed by hand |
+| `AUTH_SECRET` of at least 32 chars (`openssl rand -base64 32`) | A token's payload is publicly readable, so an attacker always holds a (plaintext, signature) pair — a short key is an offline brute-force target. Under `prod` this one is enforced |
+
+### 🔴 Ports: compose maps all four backing services to the host
+
+`docker-compose.yml` declares `ports:` for PostgreSQL, MongoDB, Redis and RabbitMQ
+(including the 15672 management UI). That is there for local development —
+`.env.example` explains that `*_PORT` serves two purposes: the host port mapping,
+and the port the app connects to when you run it outside Docker.
+
+On a machine with a public IP this **exposes four data services plus the RabbitMQ
+management console** — and their passwords live in the same `.env`.
+
+**Do at least one of these**: use a compose override file (`-f
+docker-compose.yml -f docker-compose.prod.yml`) that drops those `ports` sections
+and keeps only the API's, or firewall everything except the API port. Containers
+talk to each other by service name, so removing the mappings does not break them.
+
+### Both front ends are static bundles that need somewhere to live
+
+```bash
+npm --prefix admin run build      # → admin/dist
+npm --prefix client run build:h5  # → client/dist/build/h5
+```
+
+Serve each bundle from nginx (or any static server) and reverse-proxy `/api` to
+the backend. In development those `/api` calls go through vite's dev proxy; in
+production there is no vite — skipping this step looks like "the page loads, but
+every click 404s".
+
+⚠️ **Do not put the admin console and the client app on the same domain**, or at
+least keep the console out of search engines: it has no network-level isolation,
+and its only defence is the operator password plus an 8-hour ticket (see the
+"Admin console" section above).
+
+### HTTPS is not optional
+
+Opening the H5 build inside WeChat requires HTTPS; Mini Programs are stricter
+still — the request domain must be HTTPS and filed with the Chinese regulator.
+That is a platform rule, not something this project chose.
+
+### Upgrading: **migrations do not run themselves**
+
+```bash
+git pull
+docker compose up -d --build          # `up` checks whether containers run, not whether the image is fresh
+docker compose run --rm api alembic upgrade head
+```
+
+Keeping the third command separate is deliberate (same reasoning as the schema
+step in Quick start): changing a database is a consequential action, and hiding it
+behind `up` means nobody sees what it did. **Skipping it shows up as endpoints
+failing on unknown columns.**
+
+### Back up both databases — they mean different things
+
+| Database | Holds | If you lose it |
+|---|---|---|
+| PostgreSQL | Clients, accounts, daily metrics, balances, the action log, **published reports** | Everything is gone. Reports were already sent to clients; you cannot reconstruct them |
+| MongoDB | `raw_reports` snapshots, append-only | Normalised results survive, but "what did the platform actually send that day" is unanswerable — and you can no longer re-run normalisation from source |
+
+Redis (cache + task results) and RabbitMQ (queues) **need no backup** — the former
+regrows itself, the latter only holds messages still in flight.
+
 ## Stack
 
 | Layer | Choice | Why this one |
@@ -271,7 +374,7 @@ that is merely recommended rots; if it matters here, it fails the build.
 | D12 | Vue 3 admin console | Client management, imports and invite codes usable from the UI | ✅ |
 | D13 | LLM layer, call cost, action log | With a fake provider: structured input → validation → a row in `llm_calls`; actions can be recorded and queried | ✅ |
 | D14 | Report drafting / revision / publishing, anomaly diagnosis | Report carries the one line of plain English that matters, and an unrevised one cannot be published | ✅ |
-| D15 | Docs, screenshots, deploy | A stranger can run it within five minutes | ⬜ |
+| D15 | Docs, screenshots, deploy | A stranger can run it within five minutes | ✅ |
 
 **Deliberately out of scope for v1:** no live Ads API (the adapter interface is
 reserved — platform app review takes longer than this milestone), no multi-tenant
