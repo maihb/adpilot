@@ -8,10 +8,15 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field
 
-from adpilot.models.ad_account import Platform
+from adpilot.models.ad_account import DEFAULT_REPORT_DELAY_HOURS, Platform
 
 EXTERNAL_ID_MAX_LENGTH = 64
 NAME_MAX_LENGTH = 128
+
+#: 日切延迟的上限。72 小时是「三天前的日报现在才出」—— 再往上就不是延迟、是
+#: 忘了这回事，而定时那条链只看最近几天（`services/report.py` 的 `RECENT_DAYS`），
+#: 填一个更大的数只会让那个账户**永远不出日报**，且没有任何东西会说为什么。
+MAX_REPORT_DELAY_HOURS = 72
 
 
 def _known_timezone(value: str) -> str:
@@ -54,6 +59,15 @@ class AdAccountCreateRequest(BaseModel):
     currency: CurrencyCode
     timezone: TimezoneName
 
+    #: 要不要每天自动出一份日报。默认开 —— 建账户的人多半就是为了看日报。
+    auto_report: bool = True
+
+    #: 日切之后等几小时再自动生成。默认 2，理由见
+    #: [定时日报设计](../../../docs/design/2026-08-21-scheduled-reports.md) 第四节。
+    report_delay_hours: int = Field(
+        default=DEFAULT_REPORT_DELAY_HOURS, ge=0, le=MAX_REPORT_DELAY_HOURS
+    )
+
 
 class AdAccountUpdateRequest(BaseModel):
     """改账户，只动传上来的字段。
@@ -72,6 +86,9 @@ class AdAccountUpdateRequest(BaseModel):
     timezone: TimezoneName | None = None
     is_active: bool | None = None
 
+    auto_report: bool | None = None
+    report_delay_hours: int | None = Field(default=None, ge=0, le=MAX_REPORT_DELAY_HOURS)
+
 
 class AdAccountResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -84,6 +101,13 @@ class AdAccountResponse(BaseModel):
     currency: str
     timezone: str
     is_active: bool
+
+    #: 要不要每天自动出一份日报（**生成成 draft，绝不自动发布**）。
+    auto_report: bool
+
+    #: 日切后等几小时才自动生成那天的日报。
+    report_delay_hours: int
+
     created_at: datetime
     updated_at: datetime
 

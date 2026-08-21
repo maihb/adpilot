@@ -1084,6 +1084,16 @@ export interface components {
             currency: string;
             /** Timezone */
             timezone: string;
+            /**
+             * Auto Report
+             * @default true
+             */
+            auto_report: boolean;
+            /**
+             * Report Delay Hours
+             * @default 2
+             */
+            report_delay_hours: number;
         };
         /** AdAccountListResponse */
         AdAccountListResponse: {
@@ -1109,6 +1119,10 @@ export interface components {
             timezone: string;
             /** Is Active */
             is_active: boolean;
+            /** Auto Report */
+            auto_report: boolean;
+            /** Report Delay Hours */
+            report_delay_hours: number;
             /**
              * Created At
              * Format: date-time
@@ -1142,6 +1156,10 @@ export interface components {
             timezone?: string | null;
             /** Is Active */
             is_active?: boolean | null;
+            /** Auto Report */
+            auto_report?: boolean | null;
+            /** Report Delay Hours */
+            report_delay_hours?: number | null;
         };
         /**
          * AlertItem

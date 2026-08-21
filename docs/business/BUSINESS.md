@@ -36,12 +36,12 @@
 | [客户与账户](clients.md) | `clients` | 客户、广告账户（平台/币种/**时区**）、账户与客户的归属 | `client.py` `ad_account.py`（model / schema / service / api 四层同名） | ✅ D3：建、查、改与分页已落地，无删除 |
 | [数据接入](imports.md) | `imports` | `ReportProvider` 适配器注册表、文件导入、原始快照落盘 | `providers/` `services/imports.py` | ✅ D3：CSV 导入与 append-only 落盘已通，Excel 与拉取调度未做 |
 | [日指标](metrics.md) | `metrics` | 平台字段 → 统一口径、唯一键 upsert、按天查询与派生指标 | `services/field_maps.py` `services/normalize.py` `services/daily_metric.py` | ✅ D3–D5：归一化与按天查询已通；聚合与环比未做 |
-| [异步任务](tasks.md) | `tasks` | Celery + RabbitMQ、重试与死信队列、任务状态查询、定时排期 | `db/broker.py` `tasks/` `services/task.py` | ✅ D6：归一化已异步化；D8：告警巡检已进 `beat_schedule`（**要另起一个 beat 进程**） |
+| [异步任务](tasks.md) | `tasks` | Celery + RabbitMQ、重试与死信队列、任务状态查询、定时排期 | `db/broker.py` `tasks/` `services/task.py` | ✅ D6 归一化异步化；D8 告警巡检、D18 定时日报进 `beat_schedule`（**要另起一个 beat 进程**） |
 | [余额与账户](balances.md) | `balances` | 余额快照录入、可撑天数 | `rules/balance.py` `services/balance.py` | ✅ D7 |
 | [库存与断货](stock.md) | `products` | 库存表导入、可撑天数、**日均销量的两个来源**。告警是**客户级**的 | `rules/stock.py` `providers/stock_csv.py` `services/product.py` | ✅ D16：整条链已通；商品与广告系列的映射明确不做 |
 | [告警与巡检](alerts.md) | `alerts` | 状态机去重、定时巡检、指标异动、webhook 推送 | `rules/anomaly.py` `services/alert.py` `tasks/alerts.py` `notifiers/` | ✅ D8：巡检自动跑、同一件事只报一次；D16 加了客户级那一层 |
 | [操作记录](actions.md) | `actions` | 「本期做了什么」的唯一数据来源，**`reason` 必填** —— 平台变更日志补得上「改了什么」，补不上「为什么」 | `models/action.py` `services/action.py` `api/action.py` | ✅ D13：登记与查询已通；自动抓平台变更日志未做，[发布前校验非空](../design/2026-08-19-mvp-design.md#4-投放操作记录mvp-手动登记必填)随日报走 |
-| [日报](reports.md) | `reports` | 生成 → 人工修订 → 发布，**快照固定**、两版人话都存、两条硬校验 | `models/report.py` `services/report.py` `api/report.py` | ✅ D14：整条链已通，客户端只看得到已发布的；编辑界面与定时生成未做 |
+| [日报](reports.md) | `reports` | 生成 → 人工修订 → 发布，**快照固定**、两版人话都存、两条硬校验 | `models/report.py` `services/report.py` `api/report.py` `tasks/reports.py` | ✅ D14 整条链 + D18 定时生成（每小时扫，生成成**草稿**，绝不自动发布） |
 | [LLM](llm.md) | — | 适配器、输出契约（**没有数字字段**）、提示词版本、调用成本与每日闸门 | `llm/` `services/llm.py` `models/llm_call.py` | ✅ D13–D14：日报撰写与按需诊断都在用它；RAG 不做 |
 | 健康检查 | `health` | 存活与就绪探针 | `api/health.py` | ✅ 已落地 |
 

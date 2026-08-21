@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from enum import StrEnum
 
-from sqlalchemy import Boolean, ForeignKey, String, UniqueConstraint, true
+from sqlalchemy import Boolean, ForeignKey, SmallInteger, String, UniqueConstraint, text, true
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from adpilot.db.postgres import Base
@@ -22,6 +22,16 @@ class Platform(StrEnum):
 
     META = "meta"
     TIKTOK = "tiktok"
+
+
+#: 日切之后等几小时再自动生成日报的**默认值**。
+#:
+#: 定在这里是因为表结构是真相源，`schemas/` 和 `services/` 都引用它 —— 三处各写
+#: 一个 2，改的时候必然漏掉一处，而漏掉的那处不会报错。
+#:
+#: ⚠️ **改它只影响以后新建的账户。** 列的 `server_default` 由迁移固化在数据库里，
+#: 而迁移是历史、不该回头改 —— 已有的行要跟着变得写一条新的数据订正迁移。
+DEFAULT_REPORT_DELAY_HOURS = 2
 
 
 class AdAccount(Base, TimestampMixin):
@@ -68,6 +78,34 @@ class AdAccount(Base, TimestampMixin):
     timezone: Mapped[str] = mapped_column(String(64))
 
     is_active: Mapped[bool] = mapped_column(Boolean(), server_default=true())
+
+    #: 要不要每天自动出一份日报（生成成 draft，**绝不自动发布**）。
+    #:
+    #: 🔴 **它是省钱的闸门，不是审美偏好。** 并不是每个账户都要日报（内部测试
+    #: 账户、只看看板的客户），而没有这个开关，那些账户每天白烧一次 LLM 调用 ——
+    #: 自托管意味着花的是使用者自己的钱。
+    #:
+    #: **和 `is_active` 是两件事**：停投的账户仍然要日报（复盘那几天怎么停的），
+    #: 而不看日报的账户可能一直在投。
+    auto_report: Mapped[bool] = mapped_column(Boolean(), server_default=true())
+
+    #: 账户时区下的日切之后，至少等这么多小时才自动生成那天的日报。
+    #:
+    #: ⚠️ **它防的不是「等数据稳定」** —— 平台数据在若干天内都还会变（glossary
+    #: 的「回填与重述」），等不来。数字后来确实变了的处理方式是既有的那条：发新
+    #: 的一份并注明重述，不动老的那份。
+    #:
+    #: 它防的是三件具体的事：平台自己日切的延迟、夏令时那天不是 24 小时、以及
+    #: 接了 Ads API 之后「日切就拉」的冲动。在 CSV 世界里它几乎不起作用（「那天
+    #: 有没有数据」本身就是更强的门），留着是为了接 API 那天不用改结构。
+    #:
+    #: 取值范围由 `schemas/ad_account.py` 卡（0–72），不在这里加 CHECK 约束 ——
+    #: 那是 autogenerate 的盲区（见 docs/design/2026-08-19-schema-migration.md），
+    #: 而这个值写错的后果只是日报早几小时或晚几小时，不值得为它引一条每次都要
+    #: 手写迁移的约束。
+    report_delay_hours: Mapped[int] = mapped_column(
+        SmallInteger(), server_default=text(str(DEFAULT_REPORT_DELAY_HOURS))
+    )
 
     # lazy="raise"：忘了 eager load 就当场报错，而不是在 async 下触发一次隐式
     # 懒加载 —— 那会抛 MissingGreenlet，报错信息与真正的原因（少写了一个

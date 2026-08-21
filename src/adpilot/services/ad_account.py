@@ -8,7 +8,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from adpilot.models.ad_account import AdAccount, Platform
+from adpilot.models.ad_account import DEFAULT_REPORT_DELAY_HOURS, AdAccount, Platform
 from adpilot.models.client import Client
 from adpilot.services.exceptions import (
     ConflictError,
@@ -18,7 +18,19 @@ from adpilot.services.exceptions import (
 
 # `platform` 与 `external_id` 不在里面：它们是账户的身份。改了等于换了一个账户，
 # 而历史 daily_metrics 仍挂在原 account_id 上，改完那些数据就跟平台对不上了。
-UPDATABLE_FIELDS = frozenset({"client_id", "name", "currency", "timezone", "is_active"})
+#: 🔴 **加了可改的字段就要在这里补一个名字。** `update` 拿它当白名单，漏了的
+#: 症状是接口收下了那个字段、返回 200、而值根本没变 —— 一次安静的无操作。
+UPDATABLE_FIELDS = frozenset(
+    {
+        "client_id",
+        "name",
+        "currency",
+        "timezone",
+        "is_active",
+        "auto_report",
+        "report_delay_hours",
+    }
+)
 
 
 async def create(
@@ -30,11 +42,17 @@ async def create(
     name: str,
     currency: str,
     timezone: str,
+    auto_report: bool = True,
+    report_delay_hours: int = DEFAULT_REPORT_DELAY_HOURS,
 ) -> AdAccount:
     """建一个广告账户。
 
     客户不存在抛 `ReferenceNotFoundError`，`(platform, external_id)` 重复抛
     `ConflictError`。
+
+    ⚠️ 两个日报开关在这里**显式传**，不靠列的 server_default 兜 —— 靠默认值的话
+    调用方传了 `auto_report=False` 也不会有任何效果（ORM 不会把它写进 INSERT），
+    而接口会照常返回 201。
     """
     await _ensure_client_exists(session, client_id)
 
@@ -45,6 +63,8 @@ async def create(
         name=name,
         currency=currency,
         timezone=timezone,
+        auto_report=auto_report,
+        report_delay_hours=report_delay_hours,
     )
     session.add(account)
     await _flush_or_conflict(session, platform=platform, external_id=external_id)

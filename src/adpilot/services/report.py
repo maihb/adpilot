@@ -19,16 +19,19 @@ A 点了发布、客户收到的是 B。快照本身的理由见 `models/report.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from datetime import UTC, date, datetime, timedelta
+from dataclasses import dataclass
+from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import structlog
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from adpilot.config import Settings
+from adpilot.db.postgres import transaction
 from adpilot.llm import prompts
 from adpilot.llm.base import LLMProvider
 from adpilot.llm.contracts import ActionLine, DailyReportInput, DailyReportNarrative, MetricLine
@@ -42,9 +45,24 @@ from adpilot.services import ad_account as ad_account_service
 from adpilot.services import alert as alert_service
 from adpilot.services import daily_metric as daily_metric_service
 from adpilot.services import llm as llm_service
-from adpilot.services.exceptions import ConflictError, NotFoundError
+from adpilot.services.exceptions import (
+    ConflictError,
+    DomainError,
+    NotFoundError,
+    QuotaExceededError,
+)
 
 log = structlog.get_logger(__name__)
+
+#: 定时那条链只回头看这么多天。⚠️ 待定参数，当前取 3。
+#:
+#: 🔴 **不卡这个窗口会立刻踩一个坑**：运营补导一份跨 28 天的历史 CSV，归一化写了
+#: 28 天，于是一口气生成 28 份日报 —— 以及 28 次 LLM 调用。那是真金白银，而且没有
+#: 人会看三周前的日报。
+#:
+#: 3 天盖得住「周五的数据周一才导」这种常见的拖延，同时把「补历史」挡在外面。
+#: 手动生成接口不受它限制 —— 那边是人指名要哪一天。
+RECENT_DAYS = 3
 
 #: 一次日报最多带几条告警摘要进提示词。开着二十条告警的账户不需要日报，需要的是
 #: 有人去处理它 —— 而把它们全塞进提示词只会让那一行人话变成告警的复读。
@@ -97,6 +115,217 @@ async def generate(
         actions=len(report.actions_snapshot),
     )
     return report
+
+
+@dataclass(frozen=True, slots=True)
+class DueReport:
+    """一份**该出但还没出**的日报。"""
+
+    account_id: int
+    account_name: str
+    stat_date: date
+
+
+@dataclass(frozen=True, slots=True)
+class ScheduleSummary:
+    """一轮定时生成的结果。"""
+
+    #: 这一轮看了几个账户（在投 + 开着 `auto_report` 的）。
+    accounts: int
+
+    generated: int
+
+    #: 生成失败的份数。**一个账户失败不拖累其它**，所以这个数可以大于 0 而整轮
+    #: 仍然算跑完了。
+    failed: int
+
+    #: 撞上每日 LLM 额度上限而**提前中断**。为真时后面那些账户这一轮根本没看 ——
+    #: 不报出来的话，「今天怎么少了几份」会变成一桩无头案。
+    quota_exhausted: bool = False
+
+
+async def due_reports(
+    session: AsyncSession,
+    *,
+    now: datetime | None = None,
+) -> list[DueReport]:
+    """扫出此刻**该出但还没出**的那些日报。
+
+    判据是三个条件，缺一不可（[定时日报设计][d] 第三节）：
+
+    1. 那天在**账户时区**下已经结束，且已过账户的 `report_delay_hours`；
+    2. 那天**有 `daily_metrics` 数据** —— 没数据的那天生成出来是一份空日报，而
+       空日报比没有日报更糟：它看起来像是「昨天什么都没花」；
+    3. 那天**还没有任何日报**（含 draft）—— 人可能正在改那份 draft，重新生成会
+       把他改好的那版清掉。
+
+    外加两个账户级开关：`is_active`（停投的不看，同告警巡检）和 `auto_report`
+    （那是省钱的闸门，见 `models/ad_account.py`）。
+
+    🔴 **只回头看 `RECENT_DAYS` 天**，理由见那个常量 —— 不卡窗口的话，一次历史
+    补导会炸出几十份日报和同样多次 LLM 调用。
+
+    **这个函数本身不写任何东西**，所以它可以被反复调用、也可以单独测。
+
+    [d]: ../../../docs/design/2026-08-21-scheduled-reports.md
+    """
+    moment = now or datetime.now(UTC)
+
+    accounts = (
+        await session.scalars(
+            select(AdAccount)
+            .where(AdAccount.is_active.is_(True), AdAccount.auto_report.is_(True))
+            .order_by(AdAccount.id)
+        )
+    ).all()
+
+    due: list[DueReport] = []
+    for account in accounts:
+        candidates = _closed_days(account, moment)
+        if not candidates:
+            continue
+
+        # 一次问清「这几天里哪些有数据」和「哪些已经有日报」，而不是逐天两次查询：
+        # 账户数 × 天数 × 2 次往返，在几十个账户上就已经能看出来了。
+        with_data = set(
+            await daily_metric_service.days_with_data(
+                session, account_id=account.id, days=candidates
+            )
+        )
+        already = set(
+            (
+                await session.scalars(
+                    select(Report.stat_date).where(
+                        Report.account_id == account.id,
+                        Report.stat_date.in_(candidates),
+                    )
+                )
+            ).all()
+        )
+
+        due.extend(
+            DueReport(account_id=account.id, account_name=account.name, stat_date=day)
+            for day in candidates
+            if day in with_data and day not in already
+        )
+
+    log.info("due_reports_evaluated", accounts=len(accounts), due=len(due))
+    return due
+
+
+def _closed_days(account: AdAccount, now: datetime) -> list[date]:
+    """这个账户最近哪几天**已经结束、且过了延迟**。最近的排最后。
+
+    🔴 **判据是「那天的次日零点 + delay 是否已过」，不是「今天减一」。**
+
+    差别在跨时区的时候，而且两个方向都错得很安静：洛杉矶的账户在 UTC 下的
+    「昨天」可能还没过完（于是生成一份缺半天数据的日报），而上海的账户在
+    UTC 下的「今天」其实早就结束了（于是日报晚出十几个小时）。
+
+    夏令时那天不是 24 小时，所以是拿**那天的次日零点**去比，而不是拿「那天零点
+    加 24 小时」—— 后者在切换日会差一个小时（同 `services/action.py` 的
+    `window_bounds`）。
+    """
+    tz = ZoneInfo(account.timezone)
+    today = now.astimezone(tz).date()
+    delay = timedelta(hours=account.report_delay_hours)
+
+    days: list[date] = []
+    for offset in range(RECENT_DAYS, 0, -1):
+        day = today - timedelta(days=offset)
+        # 那天在账户时区下的结束时刻 = 次日零点。datetime.combine 带 tzinfo 才是
+        # 那个时区的零点；换算成 UTC 之后才谈得上和 now 比。
+        closed_at = datetime.combine(day + timedelta(days=1), time(0, 0), tzinfo=tz)
+        if closed_at + delay <= now:
+            days.append(day)
+    return days
+
+
+async def generate_due(
+    session_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+    *,
+    now: datetime | None = None,
+    provider: LLMProvider | None = None,
+) -> ScheduleSummary:
+    """把此刻该出的日报都生成出来，全部是 **draft**。
+
+    🔴 **绝不自动发布。** 发布的两条硬校验（人工修订过、操作记录非空）是设计文档
+    第五节那条边界的最后一道人工闸门 —— 模型可能在散文里编一个百分比，没有机器
+    拦得住。这一段省掉的不是「审」，是「点生成然后等十几秒」。
+
+    ### 为什么收 `session_factory` 而不是 `session`
+
+    **每份日报各自一个事务。** 一个账户的时区填错了（或者哪天的数据有问题），
+    抛出来的异常会让整个外层事务回滚 —— 于是前面十个账户已经生成好的日报**一起
+    没了**，而下一轮会重新烧一遍那十次 LLM 调用。
+
+    这也是这个函数不待在 `sweep` 那种「一个 session 走到底」的形状里的原因：
+    告警对账是纯数据库操作、便宜且可重放，日报每一份都花了钱。
+
+    ### 额度用光就整轮中断
+
+    撞上 `QuotaExceededError` 时**停下来**，而不是跳过这一个继续 —— 继续只会把
+    剩下的调用全撞在同一堵墙上，然后日志里全是同一个错。已生成的那些留着，
+    `quota_exhausted` 报出去。
+    """
+    moment = now or datetime.now(UTC)
+
+    async with session_factory() as scan_session:
+        due = await due_reports(scan_session, now=moment)
+        accounts = len({item.account_id for item in due})
+
+    generated = 0
+    failed = 0
+    quota_exhausted = False
+
+    for item in due:
+        try:
+            async with transaction(session_factory) as session:
+                await generate(
+                    session,
+                    settings,
+                    account_id=item.account_id,
+                    stat_date=item.stat_date,
+                    provider=provider,
+                )
+            generated += 1
+        except QuotaExceededError as exc:
+            log.warning(
+                "scheduled_reports_quota_exhausted",
+                account_id=item.account_id,
+                stat_date=item.stat_date.isoformat(),
+                reason=exc.message,
+                remaining=len(due) - generated - failed,
+            )
+            quota_exhausted = True
+            break
+        except DomainError as exc:
+            # 这一个账户的数据有问题（时区名不存在、那天的数据在两次查询之间被
+            # 删了）。记下来接着走下一个 —— 一份出不来不该拖累其余的。
+            log.error(
+                "scheduled_report_failed",
+                account_id=item.account_id,
+                stat_date=item.stat_date.isoformat(),
+                reason=exc.message,
+            )
+            failed += 1
+
+    summary = ScheduleSummary(
+        accounts=accounts,
+        generated=generated,
+        failed=failed,
+        quota_exhausted=quota_exhausted,
+    )
+    log.info(
+        "scheduled_reports_finished",
+        accounts=summary.accounts,
+        due=len(due),
+        generated=summary.generated,
+        failed=summary.failed,
+        quota_exhausted=summary.quota_exhausted,
+    )
+    return summary
 
 
 async def revise(

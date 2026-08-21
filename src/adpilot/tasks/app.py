@@ -31,7 +31,11 @@ else:
 # 而不是在本文件底部 import 它们 —— 那会绕成环（任务模块要从这里取 `celery_app`）。
 # **加一个任务模块就要在这里补一行**，漏了的症状是队列里的消息被 worker 以
 # 「Received unregistered task」拒掉，而任务代码本身看起来毫无问题。
-TASK_MODULES: Final = ("adpilot.tasks.normalize", "adpilot.tasks.alerts")
+TASK_MODULES: Final = (
+    "adpilot.tasks.normalize",
+    "adpilot.tasks.alerts",
+    "adpilot.tasks.reports",
+)
 
 celery_app = create_celery_app(get_settings(), include=TASK_MODULES)
 

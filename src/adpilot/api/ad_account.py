@@ -54,6 +54,8 @@ async def create_ad_account(
         name=request.name,
         currency=request.currency,
         timezone=request.timezone,
+        auto_report=request.auto_report,
+        report_delay_hours=request.report_delay_hours,
     )
     return AdAccountResponse.model_validate(account)
 

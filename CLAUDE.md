@@ -92,6 +92,7 @@
 | **make 只放已授权的 target** | `settings.json` 逐条精确列出；`Bash(make:*)` 刻意不加 —— target 里能写任意命令，通配一条就等于给守卫开后门。新 target 默认不授权 |
 | **celery 只放 worker / beat 子命令** | `settings.json` 里逐条列出，不是 `uv run celery:*` —— 同一个 CLI 底下还有 `purge`（清空队列）和 `control`（远程指挥 worker） |
 | **worker / beat 的启动参数不许被删** | `tests/test_tasks.py` 同时盯着 Makefile 和 compose：`--without-mingle` / `--without-gossip`（少了 RabbitMQ 4 上起不来）、`-Q adpilot`（少了一条消息都不处理）、以及「有没有 beat 的启动方式」 |
+| **两个排期任务不许撞在同一分钟** | 同上那个文件。日报要引用「当时开着的告警」，而巡检正是产出那些告警的 —— 同一分钟投出来时谁先跑取决于 worker 取消息的顺序，于是有几天的日报会少一段，**而它不报错**。⚠️ mypy 其实已经在编译期证明了这两个常量不相等（那条断言带着 `type: ignore`），测试留着是因为那个证明只在两者都是字面量时成立 |
 | **不监听端口的服务要显式关掉 healthcheck** | 同上那个文件。`HEALTHCHECK` 在 Dockerfile 里是**镜像级**的，三个进程共用一个镜像 —— worker / beat 不禁用就永远 unhealthy，而一个恒为红的健康灯会让人对整列输出脱敏 |
 | **示例数据一眼看得出是假的** | `tests/test_seed.py`：客户名要 `示例｜` 前缀，账户、系列与 SKU 要 `demo-` 前缀。同一个文件还盯着「跑完恰好三条告警」—— 那个数字写在**四个**地方（README、seed 的 docstring、seed 的命令行回执、这条测试），而只有测试会拦住改漏的人 |
 | **迁移不悄悄删数据** | `tests/test_migration_safety.py`：`upgrade()` 里出现删表/删列，就必须在文件里写一行 `# DESTRUCTIVE-OK: <理由>`。只扫 `upgrade()` —— `downgrade()` 里的 drop 是回滚，每个建表迁移都有 |
@@ -162,7 +163,8 @@ uv run uvicorn adpilot.main:app --reload --reload-dir src   # 只盯 src，改�
 uv run celery -A adpilot.tasks.app worker --loglevel=info -Q adpilot \
     --without-mingle --without-gossip
 
-# 定时排期。**worker 和 beat 两个都要起** —— 只起 worker 的症状是「告警一条都不来」，
+# 定时排期。**worker 和 beat 两个都要起** —— 只起 worker 的症状是「告警一条都不来、
+# 日报也不会自己出」，
 # 而那看起来跟「一切正常」一模一样。只能有一个 beat 实例，起两个就是每个排期投两遍。
 uv run celery -A adpilot.tasks.app beat --loglevel=info \
     --schedule=/tmp/adpilot-celerybeat-schedule

@@ -26,6 +26,10 @@
 | 客户详情 | 发邀请码、停用客户 | `listInvites` · `createInvite` · `revokeInvite` · `updateClient` |
 | 账户明细 | 核对数字、**登记调整**、录余额、重跑归一化 | `listActions` · `recordAction` · `listDailyMetrics` · `recordBalance` · `normalizeAccount` |
 
+> ⚠️ **两个日报开关（`auto_report` / `report_delay_hours`）目前只能调接口改**，
+> 界面上还没有 —— 见「已知残余」。默认值（开、2 小时）对绝大多数账户是对的，
+> 所以这一屏没有它也走得通；要关掉某个账户的自动日报得 PATCH 一次。
+
 🔴 **「登记一次调整」不是台账，它在运营那条动线上。** 日报发布硬校验当期操作记录
 非空（`services/report.py`），所以**不登记就发不出去**。D17 之前这一步只能调接口，
 而日报屏上那句「先去账户明细登记」指向的正是一个不存在的地方 —— 那是这个后台唯一
@@ -125,6 +129,9 @@
 - **没有网络层隔离**。后台不该暴露在公网，但 MVP 不做 nginx 规则 / IP 白名单 /
   VPN —— 那是部署形态的事。**它唯一的防线是运营的账号密码 + 8 小时的票**，这句话
   也写在 README 里。
+- **两个日报开关没有界面**（D18 加的 `auto_report` / `report_delay_hours`）。
+  改它们要 PATCH `/api/ad-accounts/{id}`。放着不做是因为默认值对绝大多数账户成立，
+  而一屏配置项的维护成本高于它此刻的价值 —— 真要关掉某个账户的自动日报时再加。
 - **没有新建广告账户的界面**。`createAdAccount` 接口在，但一个客户的账户是一次性
   配置，用 curl 或 Swagger 建更快，为它做一屏是范围蔓延。
 - **没有图表**（同客户端）。

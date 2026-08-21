@@ -13,7 +13,7 @@ server.
 
 [中文（主）](README.md) · [Design doc (zh)](docs/design/2026-08-19-mvp-design.md)
 
-> **Status: milestone D1–D16 of 16 — the whole MVP scope is done.** The chain is:
+> **Status: milestone D1–D18 of 18 — the whole MVP scope is done.** The chain is:
 > import a CSV → raw snapshot → normalised daily metrics → rule sweep → alert
 > push → **daily report** (numbers computed in code, prose drafted by an LLM,
 > publishable only after a human edits it) → the client sees the published one.
@@ -260,7 +260,7 @@ uv run python -m adpilot.auth.password   # generate the operator password hash
                                          #   arguments, which would land in shell history)
 make dev          # run the API with hot reload
 make worker       # in a second terminal: run the Celery worker on the adpilot queue
-make beat         # and a third: run the scheduler (hourly alert sweep depends on it)
+make beat         # and a third: the scheduler (hourly alert sweep and report run depend on it)
 make check        # run before pushing: all four CI gates in one go
 make migrate      # bring the database up to the latest schema
 make seed         # load anonymised sample data (run make migrate first)
@@ -383,6 +383,8 @@ regrows itself, the latter only holds messages still in flight.
 | D14 | Report drafting / revision / publishing, anomaly diagnosis | Report carries the one line of plain English that matters, and an unrevised one cannot be published | ✅ |
 | D15 | Docs, screenshots, deploy | A stranger can run it within five minutes | ✅ |
 | D16 | Stock-out alerts | Two stock imports are enough to compute runway and open a client-level alert | ✅ |
+| D17 | Action log UI | An operator gets through the day without curl: import → alerts → log a change → report → publish | ✅ |
+| D18 | Scheduled reports | Import the data and click nothing; the next hourly run drafts the report, and never twice | ✅ |
 
 **Deliberately out of scope for v1:** no live Ads API (the adapter interface is
 reserved — platform app review takes longer than this milestone), no multi-tenant

@@ -213,6 +213,33 @@ async def totals_on_days(
     )
 
 
+async def days_with_data(
+    session: AsyncSession,
+    *,
+    account_id: int,
+    days: Sequence[date],
+) -> list[date]:
+    """给定的这几天里，哪几天**真有指标行**。
+
+    定时日报用它判「那天的数据到齐了吗」。**不做任何汇总** —— 只问在不在，所以
+    这里是 `DISTINCT stat_date` 而不是走 `_totals_by_day`：后者要按层级挑一份、
+    要 SUM 五个列，而这个问题一个索引扫描就够了。
+
+    🔴 **「有行」和「花了钱」是两件事。** 暂停投放的那天有指标行、`spend` 是 0，
+    那天照样该出日报（客户要看到「昨天按计划停了」）。判「有没有花钱」会让暂停
+    期间的日报整段消失，而那正是客户最想看到解释的几天。
+    """
+    if not days:
+        return []
+
+    rows = await session.scalars(
+        select(DailyMetric.stat_date)
+        .where(DailyMetric.account_id == account_id, DailyMetric.stat_date.in_(days))
+        .distinct()
+    )
+    return list(rows.all())
+
+
 async def _totals_by_day(
     session: AsyncSession,
     *,

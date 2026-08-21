@@ -40,6 +40,7 @@ from adpilot.config import Settings
 # 没人认领。名字定在这里而不是任务模块里，正是为了让生产者够得着它。
 TASK_NORMALIZE_ACCOUNT: Final = "adpilot.normalize_account"
 TASK_SWEEP_ALERTS: Final = "adpilot.sweep_alerts"
+TASK_GENERATE_DUE_REPORTS: Final = "adpilot.generate_due_reports"
 
 # 巡检的排期。**每小时一次，不是每天一次。**
 #
@@ -49,6 +50,20 @@ TASK_SWEEP_ALERTS: Final = "adpilot.sweep_alerts"
 # 敢这么密是因为两件事：巡检本身很轻（几个账户、两条 SQL），以及告警是**状态机**
 # —— 同一件事只有一条 open，只在新开时推送，所以密集巡检不会变成密集打扰。
 SWEEP_SCHEDULE_MINUTE: Final = 0
+
+#: 定时日报的排期。**同样每小时一次，而且理由和上面不一样。**
+#:
+#: 账户时区各不相同，日切点散布在一天里的各个整点上（本项目真实案例里就有
+#: Los_Angeles、Anchorage、Shanghai、Berlin 四个）。一天扫一次的话，某些时区的
+#: 账户要多等二十几个小时才拿到日报 —— 而日报的价值几乎全在及时性上。
+#:
+#: 敢这么密的理由和巡检不同：巡检是「跑一遍规则」，这个是「**可能**生成几份日报，
+#: 而每份都要花一次 LLM 调用」。密而不贵靠的是判定本身 —— 那天已经有日报就跳过，
+#: 所以绝大多数轮次什么都不做（`services/report.py` 的 `due_reports`）。
+#:
+#: 错开 20 分是为了不和巡检抢同一分钟：两个任务都会在整点被投出来，而巡检的结果
+#: （新开的告警）正是日报要引用的东西 —— 让它先跑完。
+REPORTS_SCHEDULE_MINUTE: Final = 20
 
 MAIN_QUEUE: Final = "adpilot"
 DEAD_LETTER_QUEUE: Final = "adpilot.dead"
@@ -150,6 +165,11 @@ def create_celery_app(settings: Settings, *, include: Sequence[str] = ()) -> Cel
                 "schedule": crontab(minute=SWEEP_SCHEDULE_MINUTE),
                 # 排期投出来的消息也要落在业务队列上，否则它会去默认的 celery
                 # 队列，而 worker 只消费 adpilot —— 消息进去了，没人取。
+                "options": {"queue": MAIN_QUEUE},
+            },
+            "generate-due-reports-hourly": {
+                "task": TASK_GENERATE_DUE_REPORTS,
+                "schedule": crontab(minute=REPORTS_SCHEDULE_MINUTE),
                 "options": {"queue": MAIN_QUEUE},
             },
         },

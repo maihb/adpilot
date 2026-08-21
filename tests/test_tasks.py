@@ -34,6 +34,9 @@ from adpilot.db.broker import (
     DEAD_LETTER_EXCHANGE,
     DEAD_LETTER_QUEUE,
     MAIN_QUEUE,
+    REPORTS_SCHEDULE_MINUTE,
+    SWEEP_SCHEDULE_MINUTE,
+    TASK_GENERATE_DUE_REPORTS,
     TASK_NORMALIZE_ACCOUNT,
     TASK_SWEEP_ALERTS,
 )
@@ -174,17 +177,36 @@ def test_beat_has_a_way_to_be_started(path: str) -> None:
     assert "beat" in content
 
 
-def test_the_sweep_is_scheduled() -> None:
-    """排期本身也钉一条：巡检任务必须真的在 `beat_schedule` 里，且投到业务队列。
+@pytest.mark.parametrize("task_name", [TASK_SWEEP_ALERTS, TASK_GENERATE_DUE_REPORTS])
+def test_scheduled_tasks_go_to_the_business_queue(task_name: str) -> None:
+    """两个排期任务都要真的在 `beat_schedule` 里，且投到业务队列。
 
     投错队列的话消息会进默认的 `celery` 队列，而 worker 只消费 `adpilot` ——
-    消息进去了，没人取，同样是「一条告警都不来」。
+    消息进去了，没人取。症状按任务不同：巡检那条是「一条告警都不来」，日报那条
+    是「早上打开后台一份草稿都没有」，两者都跟「最近没什么事」长得一样。
     """
     schedule = celery_app.conf.beat_schedule
-    entries = [entry for entry in schedule.values() if entry["task"] == TASK_SWEEP_ALERTS]
+    entries = [entry for entry in schedule.values() if entry["task"] == task_name]
 
-    assert len(entries) == 1
+    assert len(entries) == 1, f"{task_name} 不在排期里（或者排了两次）"
     assert entries[0]["options"]["queue"] == MAIN_QUEUE
+
+
+def test_the_two_schedules_do_not_collide() -> None:
+    """🔴 巡检和日报**不排在同一分钟**。
+
+    日报要引用「当时开着的告警」（`services/report.py` 的 `_fill_facts`），而巡检
+    正是产出那些告警的。两个任务同时被投出来时，谁先跑取决于 worker 的并发和
+    取消息的顺序 —— 于是日报里那段「当时有哪些告警」时有时无，而它不会报错，
+    只是有几天的日报少了一段。
+    """
+    # `type: ignore` 是**好消息，不是妥协**：两个常量都是 Final 字面量，所以 mypy
+    # 在编译期就证明了它们不相等 —— 比这条测试更早、更彻底。留着这条断言是因为
+    # 那个证明**只在两者都是字面量时成立**：哪天有一个改成从配置读，mypy 就不说话
+    # 了，而这条还在。
+    assert SWEEP_SCHEDULE_MINUTE != REPORTS_SCHEDULE_MINUTE, (  # type: ignore[comparison-overlap]
+        "巡检和定时日报排在了同一分钟 —— 日报要引用巡检产出的告警，让巡检先跑"
+    )
 
 
 def test_every_task_name_is_registered_by_the_modules_the_worker_loads() -> None:
@@ -202,6 +224,7 @@ def test_every_task_name_is_registered_by_the_modules_the_worker_loads() -> None
 
     assert TASK_NORMALIZE_ACCOUNT in celery_app.tasks
     assert TASK_SWEEP_ALERTS in celery_app.tasks
+    assert TASK_GENERATE_DUE_REPORTS in celery_app.tasks
     assert normalize_task.normalize_account.name == TASK_NORMALIZE_ACCOUNT
 
 
