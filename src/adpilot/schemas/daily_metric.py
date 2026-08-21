@@ -23,8 +23,11 @@ from adpilot.models.daily_metric import MetricLevel
 _SCALE = Decimal("0.000001")
 
 
-def _divide(numerator: Decimal, denominator: Decimal) -> Decimal | None:
+def divide(numerator: Decimal, denominator: Decimal) -> Decimal | None:
     """🔴 分母为 0 一律返回 `None`（无定义），**不返回 0，也不返回无穷**。
+
+    公开而不是私有，是因为日报的对照期也要算 CPA（`schemas/report.py`）—— 那个
+    公式抄第二遍的代价，就是这个文件顶上写的那句「同一个 CPA 出现两个值」。
 
     写 0 会让「今天没有转化」和「今天 CPA 是 0 元」变成同一个显示值 —— 而这两件
     事在日报里天差地别（glossary「指标」一节开头那条）。
@@ -52,28 +55,28 @@ class DerivedMetrics(BaseModel):
     @computed_field  # type: ignore[prop-decorator]  # pydantic 的装饰器与 property 的组合，mypy 认不出
     @property
     def cpm(self) -> Decimal | None:
-        return _divide(self.spend * 1000, Decimal(self.impressions))
+        return divide(self.spend * 1000, Decimal(self.impressions))
 
     @computed_field  # type: ignore[prop-decorator]
     @property
     def cpc(self) -> Decimal | None:
-        return _divide(self.spend, Decimal(self.clicks))
+        return divide(self.spend, Decimal(self.clicks))
 
     @computed_field  # type: ignore[prop-decorator]
     @property
     def ctr(self) -> Decimal | None:
         """点击率存小数不存百分数，展示时再乘 100。"""
-        return _divide(Decimal(self.clicks), Decimal(self.impressions))
+        return divide(Decimal(self.clicks), Decimal(self.impressions))
 
     @computed_field  # type: ignore[prop-decorator]
     @property
     def cpa(self) -> Decimal | None:
-        return _divide(self.spend, self.conversions)
+        return divide(self.spend, self.conversions)
 
     @computed_field  # type: ignore[prop-decorator]
     @property
     def roas(self) -> Decimal | None:
-        return _divide(self.revenue, self.spend)
+        return divide(self.revenue, self.spend)
 
 
 class DailyMetricItem(DerivedMetrics):

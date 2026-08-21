@@ -25,14 +25,16 @@
 | `listPortalMetrics` | GET `/api/portal/accounts/{account_id}/daily-metrics` | 每日时间线，一天一行 |
 | `getPortalRunway` | GET `/api/portal/accounts/{account_id}/balance-runway` | 余额还能撑几天 |
 | `listPortalAlerts` | GET `/api/portal/alerts` | 我这边有什么要注意的 |
-
-日报接口等 D12–D13（日报服务本身还没有）。
+| `listPortalReports` | GET `/api/portal/reports` | 我的日报，**只有已发布的** |
+| `getPortalReport` | GET `/api/portal/reports/{report_id}` | 一份日报的全文 |
 
 ## 能读文档就够的部分
 
 | 规则 | 一句话 |
 |---|---|
 | 客户是谁 | 从 token 里的 `client_id` 来，**没有任何接口接受它当入参** |
+| 日报还有**第二把锁** | 作用域之外再加一条 `status = published`，写在服务层的查询条件里 —— 客户不该看到草稿，更不该看到没人审过的模型原文 |
+| 日报出参**不含模型原文** | `llm_narrative` 是内部审计信息。交给客户等于把「这段话是 AI 写的、我们只过了一眼」摆出去（有门禁盯着） |
 | 不属于自己的 `account_id` | 404，不是 403 —— 403 等于承认那个账户存在 |
 | 时间线的口径 | `stat_date` 是**账户时区**下的自然日，出参里带着 `timezone` 和 `currency` |
 | 时间线的层级 | 逐天取「有数据的最高层级」，**客户端不暴露层级选项**（同一天两个层级不能相加） |
@@ -60,7 +62,8 @@
 
 ## 已知残余
 
-- **日报接口没有**，D12–D13 随日报服务一起。
+- **日报只读得到已发布的那些**，草稿和「模型写完但没人审」的一律 404。那道人工
+  闸门的理由见 [日报](reports.md) —— 它是数字正确性的最后一道防线。
 - **前端已经在了**（D10–D11）：四屏、口径怎么显示、以及那几条只能靠盯代码形状的
   门禁，写在 [客户端界面](client-app.md)。
 - **没有推送**。客户端要看到告警只能自己打开小程序 —— 主动推送要么走微信模板

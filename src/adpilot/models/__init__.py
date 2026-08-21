@@ -20,6 +20,7 @@ from adpilot.models.client import Client
 from adpilot.models.daily_metric import DailyMetric, MetricLevel
 from adpilot.models.invite import Invite
 from adpilot.models.llm_call import LLMCall
+from adpilot.models.report import Report, ReportStatus
 
 __all__ = [
     "Action",
@@ -36,4 +37,6 @@ __all__ = [
     "LLMCall",
     "MetricLevel",
     "Platform",
+    "Report",
+    "ReportStatus",
 ]

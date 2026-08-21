@@ -12,14 +12,13 @@
 
 ## 领域
 
-> **D13 完成**：日报的两块前置就位了 —— [操作记录](actions.md)（「本期做了什么」
-> 的唯一数据来源，`reason` 必填）和 [LLM 层](llm.md)（输出契约里没有数字字段，
-> 调用成本与每日闸门都在）。整条链现在是 客户与账户 → 文件导入 → Mongo 原始快照
-> →（RabbitMQ）→ 归一化 upsert → 按天查询 →（每小时 beat）→ 规则巡检 → 告警状态机
-> → webhook，外面套着一层认证（内部接口全要运营身份，客户扫邀请码换一张 7 天的票
-> 只能看自己那份），前面摆着两个前端。**下一段是 D14** 的日报 —— draft → 人工修订
-> → published，客户端只看得到已发布的那份；库存断货那条规则仍然欠着（它需要一个
-> 全新的数据域）。下表是
+> **D14 完成，MVP 的功能范围到此走完**：整条链现在是 客户与账户 → 文件导入 →
+> Mongo 原始快照 →（RabbitMQ）→ 归一化 upsert → 按天查询 →（每小时 beat）→ 规则
+> 巡检 → 告警状态机 → webhook → **日报**（数字由代码算、人话由 LLM 起草、人改完
+> 才能发）→ 客户端只看得到已发布的那份，外面套着一层认证，前面摆着两个前端。
+> **剩下的是 D15**：文档、截图、部署。⚠️ 三处还欠着 —— 日报的编辑发布屏
+> （[内部操作台](admin.md)）、客户端的日报屏（[客户端界面](client-app.md)），
+> 以及库存断货那条规则（它需要一个全新的数据域）。下表是
 > [设计文档第六、七节](../design/2026-08-19-mvp-design.md)定下的范围，落一个
 > 勾一个。**「状态」这一列不许提前打勾** —— 一张说自己有东西但其实没有的表，
 > 比没有这张表更糟。
@@ -42,8 +41,8 @@
 | [余额与账户](balances.md) | `balances` | 余额快照录入、可撑天数 | `rules/balance.py` `services/balance.py` | ✅ D7 |
 | [告警与巡检](alerts.md) | `alerts` | 状态机去重、定时巡检、指标异动、webhook 推送 | `rules/anomaly.py` `services/alert.py` `tasks/alerts.py` `notifiers/` | ✅ D8：巡检自动跑、同一件事只报一次；库存断货未做 |
 | [操作记录](actions.md) | `actions` | 「本期做了什么」的唯一数据来源，**`reason` 必填** —— 平台变更日志补得上「改了什么」，补不上「为什么」 | `models/action.py` `services/action.py` `api/action.py` | ✅ D13：登记与查询已通；自动抓平台变更日志未做，[发布前校验非空](../design/2026-08-19-mvp-design.md#4-投放操作记录mvp-手动登记必填)随日报走 |
-| 日报 | — | 生成、人工修订、发布、**快照固定** | `services/report.py`（🚧） | 🚧 D14：前置的[操作记录](actions.md)与 [LLM 层](llm.md)已就位 |
-| [LLM](llm.md) | — | 适配器、输出契约（**没有数字字段**）、提示词版本、调用成本与每日闸门 | `llm/` `services/llm.py` `models/llm_call.py` | ✅ D13：假 provider 下走通「结构化输入 → 校验 → 落 `llm_calls`」；日报与诊断本身是 D14 |
+| [日报](reports.md) | `reports` | 生成 → 人工修订 → 发布，**快照固定**、两版人话都存、两条硬校验 | `models/report.py` `services/report.py` `api/report.py` | ✅ D14：整条链已通，客户端只看得到已发布的；编辑界面与定时生成未做 |
+| [LLM](llm.md) | — | 适配器、输出契约（**没有数字字段**）、提示词版本、调用成本与每日闸门 | `llm/` `services/llm.py` `models/llm_call.py` | ✅ D13–D14：日报撰写与按需诊断都在用它；RAG 不做 |
 | 健康检查 | `health` | 存活与就绪探针 | `api/health.py` | ✅ 已落地 |
 
 ---

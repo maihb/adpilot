@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 
-from sqlalchemy import func, select
+from sqlalchemy import ColumnElement, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from adpilot.models.daily_metric import DailyMetric, MetricLevel
@@ -28,14 +28,6 @@ LEVEL_PRIORITY: tuple[MetricLevel, ...] = (
     MetricLevel.ADGROUP,
     MetricLevel.AD,
 )
-
-
-@dataclass(frozen=True, slots=True)
-class DayTotals:
-    """某个账户某一天的汇总。"""
-
-    spend: Decimal
-    conversions: Decimal
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,7 +89,12 @@ MAX_CLIENT_RANGE_DAYS = 92
 
 @dataclass(frozen=True, slots=True)
 class DaySeriesRow:
-    """客户端看板要的一天：一行数字，不分层级、不分对象。"""
+    """某个账户某一天的汇总：一行数字，不分层级、不分对象。
+
+    看板的时间线和日报的当日/对照期用的是**同一个类型**，因为它们要的本来就是
+    同一件事。分成两个（一个只有花费和转化、一个全字段）的代价是「日报想多显示
+    一个点击数」时要去改另一个函数 —— 而那两个函数连查询都是一样的。
+    """
 
     stat_date: date
     spend: Decimal
@@ -149,45 +146,16 @@ async def series_for_client(
 
     account = await ad_account_service.get_for_client(session, account_id, client_id=client_id)
 
-    rows = await session.execute(
-        select(
-            DailyMetric.stat_date,
-            DailyMetric.level,
-            func.coalesce(func.sum(DailyMetric.spend), 0),
-            func.coalesce(func.sum(DailyMetric.impressions), 0),
-            func.coalesce(func.sum(DailyMetric.clicks), 0),
-            func.coalesce(func.sum(DailyMetric.conversions), 0),
-            func.coalesce(func.sum(DailyMetric.revenue), 0),
-        )
-        .where(
-            DailyMetric.account_id == account_id,
-            DailyMetric.stat_date.between(start, end),
-        )
-        .group_by(DailyMetric.stat_date, DailyMetric.level)
+    by_day = await _totals_by_day(
+        session,
+        account_id=account_id,
+        day_filter=DailyMetric.stat_date.between(start, end),
     )
-
-    by_day: dict[date, dict[MetricLevel, DaySeriesRow]] = {}
-    for day, level, spend, impressions, clicks, conversions, revenue in rows:
-        by_day.setdefault(day, {})[level] = DaySeriesRow(
-            stat_date=day,
-            spend=Decimal(spend),
-            impressions=int(impressions),
-            clicks=int(clicks),
-            conversions=Decimal(conversions),
-            revenue=Decimal(revenue),
-        )
-
-    # 层级**逐天**挑，不是全区间挑一次：某天只导了系列级、另一天导了账户级是完全
-    # 正常的，按天各挑各的才不会把其中一天算丢（同 `totals_on_days`）。
-    picked: list[DaySeriesRow] = []
-    for day in sorted(by_day):
-        for level in LEVEL_PRIORITY:
-            row = by_day[day].get(level)
-            if row is not None:
-                picked.append(row)
-                break
-
-    return DaySeries(rows=picked, currency=account.currency, timezone=account.timezone)
+    return DaySeries(
+        rows=[by_day[day] for day in sorted(by_day)],
+        currency=account.currency,
+        timezone=account.timezone,
+    )
 
 
 async def window_totals(
@@ -228,39 +196,61 @@ async def totals_on_days(
     *,
     account_id: int,
     days: Sequence[date],
-) -> dict[date, DayTotals]:
+) -> dict[date, DaySeriesRow]:
     """给定的几天各自的汇总；没有数据的那天**不出现在返回值里**。
 
     不给缺数据的日子补一个零：调用方要能分清「那天花了 0」和「那天没导入」——
-    拿后者当基线去算周同比，会得出一个凭空的百分比。
+    拿后者当基线去算周同比，会得出一个凭空的百分比。日报那边同理，缺对照期就
+    整段环比留空，而不是说「上升了 100%」。
     """
     if not days:
         return {}
 
+    return await _totals_by_day(
+        session,
+        account_id=account_id,
+        day_filter=DailyMetric.stat_date.in_(days),
+    )
+
+
+async def _totals_by_day(
+    session: AsyncSession,
+    *,
+    account_id: int,
+    day_filter: ColumnElement[bool],
+) -> dict[date, DaySeriesRow]:
+    """按天汇总，**逐天**按层级优先级挑一份。
+
+    🔴 挑层级这一步是这个函数存在的全部理由：同一天既有账户级又有系列级数据时
+    全加起来就是**双倍花费**。而「逐天挑」不是「全区间挑一次」—— 某天只导了系列
+    级、另一天导了账户级是完全正常的，按天各挑各的才不会把其中一天算丢。
+    """
     rows = await session.execute(
         select(
             DailyMetric.stat_date,
             DailyMetric.level,
             func.coalesce(func.sum(DailyMetric.spend), 0),
+            func.coalesce(func.sum(DailyMetric.impressions), 0),
+            func.coalesce(func.sum(DailyMetric.clicks), 0),
             func.coalesce(func.sum(DailyMetric.conversions), 0),
+            func.coalesce(func.sum(DailyMetric.revenue), 0),
         )
-        .where(
-            DailyMetric.account_id == account_id,
-            DailyMetric.stat_date.in_(days),
-        )
+        .where(DailyMetric.account_id == account_id, day_filter)
         .group_by(DailyMetric.stat_date, DailyMetric.level)
     )
 
-    by_day: dict[date, dict[MetricLevel, DayTotals]] = {}
-    for day, level, spend, conversions in rows:
-        by_day.setdefault(day, {})[level] = DayTotals(
+    by_day: dict[date, dict[MetricLevel, DaySeriesRow]] = {}
+    for day, level, spend, impressions, clicks, conversions, revenue in rows:
+        by_day.setdefault(day, {})[level] = DaySeriesRow(
+            stat_date=day,
             spend=Decimal(spend),
+            impressions=int(impressions),
+            clicks=int(clicks),
             conversions=Decimal(conversions),
+            revenue=Decimal(revenue),
         )
 
-    # 层级优先级**逐天**挑，不是全区间挑一次：某天只导了系列级、另一天导了账户级
-    # 是完全正常的，按天各挑各的才不会把其中一天算丢。
-    picked: dict[date, DayTotals] = {}
+    picked: dict[date, DaySeriesRow] = {}
     for day, levels in by_day.items():
         for level in LEVEL_PRIORITY:
             totals = levels.get(level)

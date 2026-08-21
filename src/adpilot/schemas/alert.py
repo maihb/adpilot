@@ -71,3 +71,38 @@ class SweepResponse(BaseModel):
 
     #: 推送成功的条数。没配 webhook 时恒为 0，那是正常状态不是故障。
     notified: int
+
+
+class DiagnosisItem(BaseModel):
+    """一条告警的解释。**只有文字，没有会被执行的东西。**
+
+    与 `llm/contracts.py` 的 `Diagnosis` 同构，但不复用那个类：LLM 层的契约跟着
+    提示词演进，对外 API 的契约要稳定（设计文档第二节）。
+    """
+
+    #: 最可能的原因，按可能性从高到低。
+    likely_causes: list[str]
+
+    #: 人接下来该去核实什么。
+    suggested_checks: list[str]
+
+    #: 🔴 一句话建议。**没有「把预算改成 X」这种字段** —— 这个系统不碰广告平台的
+    #: 写接口，它给方向，定多少是人拿着完整上下文决定的事。
+    suggestion: str
+
+
+class DiagnosisResponse(BaseModel):
+    """诊断的结果。
+
+    ⚠️ **`diagnosis` 为 `null` 是正常返回，不是错误。** 模型这次没答上来（挂了，
+    或者连着几次输出都不合格）时走这条路 —— 接口仍然 200，因为告警本身和它带的
+    那些数字全都还在，诊断只是锦上添花。
+
+    为什么不回 503：那次调用**已经烧了 token 并落了账**，而抛异常会让整个事务
+    回滚、把那条账一起抹掉（`services/llm.py` 的模块 docstring 讲了这条）。
+    """
+
+    diagnosis: DiagnosisItem | None
+
+    #: 这次调用在 `llm_calls` 里的那一行。`diagnosis` 为空时靠它查为什么。
+    llm_call_id: int

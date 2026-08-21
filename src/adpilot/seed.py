@@ -67,15 +67,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from adpilot.config import Settings, get_settings
 from adpilot.db.postgres import create_engine, create_session_factory, transaction
 from adpilot.logging import configure_logging
+from adpilot.models.action import Action, ActionKind
 from adpilot.models.ad_account import AdAccount, Platform
 from adpilot.models.balance import Balance
 from adpilot.models.client import Client
 from adpilot.models.daily_metric import DailyMetric, MetricLevel
+from adpilot.models.report import Report
 from adpilot.rules import balance as balance_rules
+from adpilot.services import action as action_service
 from adpilot.services import ad_account as ad_account_service
 from adpilot.services import balance as balance_service
 from adpilot.services import client as client_service
 from adpilot.services import invite as invite_service
+from adpilot.services import report as report_service
 
 log = structlog.get_logger(__name__)
 
@@ -279,6 +283,8 @@ class SeedSummary:
     metrics_existing: int = 0
     balances_recorded: int = 0
     balances_existing: int = 0
+    actions_recorded: int = 0
+    reports_published: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -566,8 +572,105 @@ async def _ensure_balance(
     return True
 
 
-async def seed(session: AsyncSession) -> SeedSummary:
-    """把 `_PLAN` 灌进库里。只添不改，重复跑安全。"""
+#: 示例日报里那段人话。**是人写的，不是模型写的** —— seed 绝不调用 LLM（见
+#: `_ensure_report`），所以这份 demo 日报的 `llm_narrative` 就是空的。配了
+#: `LLM_BASE_URL` 之后自己生成一份，才看得到「模型原文 + 人工修订」两版并存。
+_DEMO_NARRATIVE = {
+    "summary": (
+        "（示例｜人工撰写）昨日花费与上周同日基本持平，转化成本小幅上行，"
+        "主要来自周末 CPM 普涨。当日按计划上调了预算，效果观察到下周一。"
+    ),
+    "highlights": ["（示例）周末 CPM 普涨，成本随之上行"],
+    "next_steps": ["（示例）观察到下周一再决定是否回调预算"],
+}
+
+
+async def _ensure_action(
+    session: AsyncSession,
+    plan: _Account,
+    account: AdAccount,
+) -> bool:
+    """给这个账户补一条昨天的操作记录，已经有就跳过。返回是不是新写的。
+
+    **每个账户都要有**：没有操作记录的账户，日报连发都发不出去（`services/report.py`
+    的 `publish` 硬校验）—— 而那正是这条示例数据要演示的东西。
+    """
+    existing = await session.scalar(
+        select(Action.id).where(Action.account_id == account.id).limit(1)
+    )
+    if existing is not None:
+        return False
+
+    yesterday = _yesterday(plan.timezone)
+    # 账户时区下的昨天中午。落在昨天那个自然日内，日报才捞得到它；也一定不在未来。
+    performed_at = datetime.combine(yesterday, time(12, 0), tzinfo=ZoneInfo(plan.timezone))
+
+    summary, reason = (
+        ("（示例）暂停该账户全部广告", "（示例）旺季结束，先停下来复盘素材再重启")
+        if plan.paused
+        else ("（示例）主力系列日预算上调 20%", "（示例）周末 CPM 普涨，先扛量到下周一再看")
+    )
+    await action_service.record(
+        session,
+        account_id=account.id,
+        kind=ActionKind.STATUS if plan.paused else ActionKind.BUDGET,
+        summary=summary,
+        reason=reason,
+        performed_at=performed_at,
+        operator="示例｜运营",
+    )
+    return True
+
+
+async def _ensure_report(
+    session: AsyncSession,
+    settings: Settings,
+    plan: _Account,
+    account: AdAccount,
+) -> bool:
+    """给这个账户造一份**已发布**的昨日日报，已经有就跳过。
+
+    走的是真链路（generate → revise → publish），不是手工拼一行塞进去 —— 示例数据
+    和真实行为漂移的话，demo 里看到的东西就没有参考价值了。顺带这也每次都验一遍
+    那两条发布校验：操作记录上一步刚补过，人工修订就是下面那次 `revise`。
+
+    🔴 **seed 绝不调用 LLM。** 哪怕使用者配了 `LLM_BASE_URL` —— 灌一次示例数据就
+    悄悄花掉几笔钱，是任何人都不会预期的行为。所以这里显式把 LLM 配置抹掉再走
+    生成，于是 `llm_narrative` 一定是空的，那段人话由 `_DEMO_NARRATIVE` 提供。
+    """
+    yesterday = _yesterday(plan.timezone)
+    existing = await session.scalar(
+        select(Report.id).where(
+            Report.account_id == account.id,
+            Report.stat_date == yesterday,
+        )
+    )
+    if existing is not None:
+        return False
+
+    offline = settings.model_copy(update={"llm_base_url": "", "llm_model": ""})
+    report = await report_service.generate(
+        session,
+        offline,
+        account_id=account.id,
+        stat_date=yesterday,
+    )
+    await report_service.revise(
+        session,
+        report_id=report.id,
+        narrative=dict(_DEMO_NARRATIVE),
+        reviewer="示例｜运营",
+    )
+    await report_service.publish(session, report_id=report.id)
+    return True
+
+
+async def seed(session: AsyncSession, settings: Settings) -> SeedSummary:
+    """把 `_PLAN` 灌进库里。只添不改，重复跑安全。
+
+    收 `settings` 是因为日报那条链要走 `services/report.py`（而不是手工拼一行
+    塞进去）—— 走真链路才保证示例数据和真实行为不漂移。
+    """
     summary = SeedSummary()
 
     for client_plan in _PLAN:
@@ -583,6 +686,8 @@ async def seed(session: AsyncSession) -> SeedSummary:
             inserted, skipped, balance_recorded = await _seed_account(
                 session, account_plan, account
             )
+            action_recorded = await _ensure_action(session, account_plan, account)
+            report_published = await _ensure_report(session, settings, account_plan, account)
             summary = _bump(
                 summary,
                 accounts_created=int(account_created),
@@ -593,6 +698,8 @@ async def seed(session: AsyncSession) -> SeedSummary:
                 balances_existing=int(
                     account_plan.balance_days is not None and not balance_recorded
                 ),
+                actions_recorded=int(action_recorded),
+                reports_published=int(report_published),
             )
 
     log.info(
@@ -601,6 +708,8 @@ async def seed(session: AsyncSession) -> SeedSummary:
         accounts_created=summary.accounts_created,
         metrics_inserted=summary.metrics_inserted,
         balances_recorded=summary.balances_recorded,
+        actions_recorded=summary.actions_recorded,
+        reports_published=summary.reports_published,
     )
     return summary
 
@@ -647,7 +756,7 @@ async def _run(settings: Settings) -> tuple[SeedSummary, list[tuple[str, str]]]:
     factory = create_session_factory(engine)
     try:
         async with transaction(factory) as session:
-            summary = await seed(session)
+            summary = await seed(session, settings)
             invites = await issue_demo_invites(session)
             return summary, invites
     finally:
@@ -684,6 +793,8 @@ def main() -> None:
         f"  账户    新建 {summary.accounts_created}，已存在 {summary.accounts_existing}\n"
         f"  日指标  新增 {summary.metrics_inserted} 行，已存在 {summary.metrics_existing} 行\n"
         f"  余额    新录 {summary.balances_recorded}，已存在 {summary.balances_existing}\n"
+        f"  操作    新登记 {summary.actions_recorded} 条\n"
+        f"  日报    新发布 {summary.reports_published} 份（昨天那天，人话是示例文案）\n"
         "\n"
         "每个示例客户各一个邀请码（每次跑 seed 都新发，且只显示这一次）：\n"
         f"{invite_lines}\n"

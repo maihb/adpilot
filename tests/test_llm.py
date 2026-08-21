@@ -14,6 +14,7 @@ import hashlib
 import types
 import typing
 from collections.abc import Sequence
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
@@ -34,7 +35,10 @@ from adpilot.llm.contracts import (
 from adpilot.llm.fake import FakeProvider
 from adpilot.llm.prompts import Purpose
 from adpilot.llm.structured import LLMGenerationError, generate
+from adpilot.models import AdAccount, Client, Platform
+from adpilot.models.alert import Alert, AlertKind, AlertStatus
 from adpilot.models.llm_call import LLMCall
+from adpilot.services import alert as alert_service
 from adpilot.services import llm as llm_service
 from adpilot.services.exceptions import NotConfiguredError, QuotaExceededError
 
@@ -347,3 +351,100 @@ def test_prompt_changes_come_with_a_version_bump(purpose: Purpose) -> None:
         f"{purpose.value} 的提示词正文改了（指纹 {digest}），但版本号还是 "
         f"{prompt.version}。**先把版本号加一**，再把新指纹填回 _PROMPT_FINGERPRINTS"
     )
+
+
+# --- 按需诊断 ---------------------------------------------------------------
+
+
+@pytest.mark.integration
+async def test_diagnosis_answers_with_directions_not_commands(
+    live_session: AsyncSession,
+    live_settings: Settings,
+) -> None:
+    """诊断给的是方向和要核实的东西，**不是一条会被执行的指令**。
+
+    输出契约里根本没有「把预算改成 X」这样的字段（`llm/contracts.py` 的
+    `Diagnosis`）—— 那是设计文档第五节第 1 条那条硬边界的形态。这里验的是这条链
+    真的通：告警 → 提示词 → 结构化输出。
+    """
+    alert = await _seed_alert(live_session, "诊断")
+    answer = (
+        '{"likely_causes": ["素材疲劳，频次已到 3.2"],'
+        ' "suggested_checks": ["看一眼近 7 天的频次曲线"],'
+        ' "suggestion": "建议换素材而不是降价"}'
+    )
+
+    outcome = await alert_service.diagnose(
+        live_session,
+        live_settings,
+        alert_id=alert.id,
+        provider=FakeProvider([answer]),
+    )
+
+    assert outcome.diagnosis is not None
+    assert outcome.diagnosis.likely_causes == ["素材疲劳，频次已到 3.2"]
+    assert outcome.call.purpose is Purpose.DIAGNOSIS
+    assert outcome.call.account_id == alert.account_id
+
+
+@pytest.mark.integration
+async def test_diagnosis_failure_is_not_an_error(
+    live_session: AsyncSession,
+    live_settings: Settings,
+) -> None:
+    """模型没答上来时返回 `diagnosis=None`，**而那次调用仍然记了账**。
+
+    不抛异常是因为抛了会回滚事务、把刚写下的那条账一起抹掉。告警本身和它带的数字
+    全都还在，诊断只是锦上添花。
+    """
+    alert = await _seed_alert(live_session, "诊断失败")
+
+    outcome = await alert_service.diagnose(
+        live_session,
+        live_settings,
+        alert_id=alert.id,
+        provider=FakeProvider([LLMUnavailableError("端点不可达")]),
+    )
+
+    assert outcome.diagnosis is None
+    assert outcome.call.status is CallStatus.UNAVAILABLE
+    assert outcome.call.id is not None
+
+
+async def _seed_alert(session: AsyncSession, suffix: str) -> Alert:
+    """造一条指标异动告警，连同它挂着的账户。"""
+    client = Client(name=f"测试客户-诊断-{suffix}")
+    session.add(client)
+    await session.flush()
+
+    account = AdAccount(
+        client_id=client.id,
+        platform=Platform.META,
+        external_id=f"demo-diagnose-{suffix}",
+        name=f"测试账户-{suffix}",
+        currency="USD",
+        timezone="America/Los_Angeles",
+    )
+    session.add(account)
+    await session.flush()
+
+    now = datetime.now(UTC)
+    alert = Alert(
+        account_id=account.id,
+        kind=AlertKind.METRIC_ANOMALY.value,
+        status=AlertStatus.OPEN.value,
+        subject="metric:cpa",
+        message="cpa 较上周同日上升 42.0%",
+        detail={
+            "metric": "cpa",
+            "current": "17.00",
+            "baseline": "12.00",
+            "direction": "up",
+            "baseline_date": "2026-08-11",
+        },
+        opened_at=now,
+        last_seen_at=now,
+    )
+    session.add(alert)
+    await session.flush()
+    return alert

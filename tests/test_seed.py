@@ -18,10 +18,13 @@ from decimal import Decimal
 
 import pytest
 from pydantic import SecretStr
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from adpilot import seed
 from adpilot.config import Environment, Settings
+from adpilot.models.llm_call import LLMCall
+from adpilot.models.report import Report, ReportStatus
 from adpilot.rules import anomaly as anomaly_rules
 from adpilot.rules import balance as balance_rules
 from adpilot.services import invite as invite_service
@@ -272,6 +275,7 @@ def test_seed_refuses_production(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.mark.integration
 async def test_the_demo_invite_codes_are_random_and_actually_work(
     live_session: AsyncSession,
+    live_settings: Settings,
 ) -> None:
     """seed 发出来的邀请码必须是**随机的**，且每个都真的能换到对应那个客户。
 
@@ -282,7 +286,7 @@ async def test_the_demo_invite_codes_are_random_and_actually_work(
     **每个客户都要有码**：四个示例账户各演示一种规则结局，而客户端一张票只能看
     一个客户。少发一个，那个客户想演示的边界在界面上就永远看不到。
     """
-    await seed.seed(live_session)
+    await seed.seed(live_session, live_settings)
 
     first = await seed.issue_demo_invites(live_session)
     second = await seed.issue_demo_invites(live_session)
@@ -301,3 +305,48 @@ async def test_the_demo_invite_codes_are_random_and_actually_work(
     for name, code in first:
         redeemed = await invite_service.redeem(live_session, code)
         assert redeemed.name == name
+
+
+@pytest.mark.integration
+async def test_seed_publishes_a_demo_report_without_ever_calling_the_model(
+    live_session: AsyncSession,
+    live_settings: Settings,
+) -> None:
+    """seed 造出的日报是**已发布**的，而且整个过程**一次模型都没调**。
+
+    两件事合在一条里验，因为它们是同一个承诺的两面：
+
+    * demo 里要看得到日报 —— 那是这套系统最值钱的产出，示例数据里没有它，等于最
+      重要的东西没展示；
+    * 🔴 **灌一次示例数据不该花钱。** 这里故意把 LLM 配上再跑 seed：哪怕使用者
+      真配了 `LLM_BASE_URL`，`llm_calls` 里也必须一行都不多 —— 悄悄花掉几笔钱是
+      任何人都不会预期的行为。
+
+    顺带这也每次都验一遍那两条发布校验（人工修订过、操作记录非空）：seed 走的是
+    真链路，两条里少一条它就发不出去、这条用例就红。
+    """
+    configured = live_settings.model_copy(
+        update={
+            "llm_base_url": "http://llm.invalid/v1",
+            "llm_model": "should-never-be-called",
+        }
+    )
+    assert configured.llm_is_configured
+
+    calls_before = await live_session.scalar(select(func.count(LLMCall.id)))
+    await seed.seed(live_session, configured)
+    calls_after = await live_session.scalar(select(func.count(LLMCall.id)))
+
+    assert calls_after == calls_before, "seed 调用了 LLM —— 灌示例数据不该花钱"
+
+    reports = (await live_session.scalars(select(Report))).all()
+    assert len(reports) == sum(len(client.accounts) for client in seed._PLAN)
+
+    for report in reports:
+        assert report.status is ReportStatus.PUBLISHED
+        # 人话是示例文案，**不是模型写的** —— 没调模型，原文自然是空的
+        assert report.narrative is not None
+        assert report.llm_narrative is None
+        assert report.llm_call_id is None
+        # 发布校验之一：本期做了什么不能是空的
+        assert report.actions_snapshot, "日报里没有操作记录，它本不该发得出去"

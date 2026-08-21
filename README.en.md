@@ -13,13 +13,15 @@ server.
 
 [中文（主）](README.md) · [Design doc (zh)](docs/design/2026-08-19-mvp-design.md)
 
-> **Status: milestone D1–D13 of 14.** The whole chain works: import a CSV → raw
-> snapshot → normalised daily metrics → rule sweep → alert push, wrapped in
-> authentication, with a client app and an admin console in front. The LLM layer
-> and the action log are in too. **The daily report itself (D14) is not built
-> yet** — that is the most valuable output of this system, so do not assume it
-> can write one before that lands. The [roadmap](#roadmap) marks what is real
-> and what is not — this README will never claim a feature that does not exist.
+> **Status: milestone D1–D14 of 14 — the feature scope is done.** The chain is:
+> import a CSV → raw snapshot → normalised daily metrics → rule sweep → alert
+> push → **daily report** (numbers computed in code, prose drafted by an LLM,
+> publishable only after a human edits it) → the client sees the published one.
+> **Two screens are still missing**: report editing/publishing in the admin
+> console, and the report screen in the client app — the APIs are there, but an
+> operator has to call them directly for now. The [roadmap](#roadmap) marks what
+> is real and what is not — this README will never claim a feature that does not
+> exist.
 
 ## Why this exists
 
@@ -184,9 +186,15 @@ you put it, and whether it sits behind a private network, is your call — this 
 written down so it does not become a silent assumption.
 
 The sample data is 3 clients and 4 ad accounts with 28 days of daily metrics,
-spanning Meta / TikTok, three currencies and three time zones. It **only adds,
+spanning Meta / TikTok, three currencies and three time zones, plus one action
+log entry per account and a **published report for yesterday**. It **only adds,
 never overwrites**, so re-running is safe; it refuses to run when
 `ENVIRONMENT=prod`.
+
+⚠️ The prose in that sample report is **canned text, not model output** — loading
+sample data should never quietly spend your money, so the seeder never calls an
+LLM (a test enforces this). Generate one yourself once `LLM_BASE_URL` is set to
+see the "model draft + human revision" pair side by side.
 
 Each account demonstrates a different rule outcome, so one sweep should produce
 **exactly** two alerts:
@@ -263,7 +271,7 @@ that is merely recommended rots; if it matters here, it fails the build.
 | D10–D11 | uni-app client | H5 running; Mini Program compiles, runtime needs your own DevTools | ✅ |
 | D12 | Vue 3 admin console | Client management, imports and invite codes usable from the UI | ✅ |
 | D13 | LLM layer, call cost, action log | With a fake provider: structured input → validation → a row in `llm_calls`; actions can be recorded and queried | ✅ |
-| D14 | Report drafting / revision / publishing, anomaly diagnosis | Report carries the one line of plain English that matters, and an unrevised one cannot be published | ⬜ |
+| D14 | Report drafting / revision / publishing, anomaly diagnosis | Report carries the one line of plain English that matters, and an unrevised one cannot be published | ✅ |
 | D15 | Docs, screenshots, deploy | A stranger can run it within five minutes | ⬜ |
 
 **Deliberately out of scope for v1:** no live Ads API (the adapter interface is

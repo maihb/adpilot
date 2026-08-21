@@ -23,6 +23,7 @@ from pydantic import BaseModel, ConfigDict
 
 from adpilot.models.ad_account import Platform
 from adpilot.schemas.daily_metric import DerivedMetrics
+from adpilot.schemas.report import BaselineComparison, ReportActionItem, ReportNarrative
 
 
 class PortalProfileResponse(BaseModel):
@@ -146,4 +147,49 @@ class PortalAlertItem(BaseModel):
 
 class PortalAlertListResponse(BaseModel):
     items: list[PortalAlertItem]
+    total: int
+
+
+class PortalReportItem(DerivedMetrics, BaselineComparison):
+    """客户看到的一份日报。
+
+    🔴 **没有 `llm_narrative`，也没有 `status`。** 客户看的是人确认过的那一版，
+    模型原文是内部的审计信息（用来回答「这句话是模型写的还是人改的」），不该出现在
+    客户端 —— 那等于把「这段话是 AI 写的、我们只是过了一眼」直接摆出去。有一条门禁
+    盯着这件事（`tests/test_reports_api.py`）。
+
+    数字是**生成那一刻的快照**，不随平台回填变化。派生指标（CPA / CTR / ROAS）由
+    后端按 [glossary](../../../docs/business/glossary.md) 的公式现算，和看板共用
+    同一份实现；金额和比率一律是**字符串**，前端不要用浮点解析
+    （`client/src/utils/` 是唯一允许转换的地方）。
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    account_id: int
+
+    #: 报告的是哪一天，**账户时区**下的自然日 —— `timezone` 一起下发就是为了让
+    #: 前端把这句口径显示出来。不注明的话客户拿自己后台的数字来对永远差一截。
+    stat_date: date
+    currency: str
+    timezone: str
+
+    # 五个基础数字 + 派生指标（CPA / CTR / ROAS）来自 DerivedMetrics，对照期与
+    # baseline_cpa 来自 BaselineComparison —— 和看板用的是同一份公式。
+
+    #: 人确认过的那段话。已发布的日报一定有它。
+    narrative: ReportNarrative
+
+    #: 本期做了什么，含「为什么这么调」。这是日报的交付价值所在。
+    actions: list[ReportActionItem]
+
+    #: 当时开着的告警摘要，规则算出来的事实。
+    alerts: list[str]
+
+    published_at: datetime
+
+
+class PortalReportListResponse(BaseModel):
+    items: list[PortalReportItem]
     total: int

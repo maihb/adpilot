@@ -3,12 +3,13 @@
 技术选型的来龙去脉在[设计文档第四节](../design/2026-08-19-mvp-design.md)，这里只讲
 **代码怎么摆、依赖往哪个方向走**。
 
-> **进度**：D1–D13 完成 —— 骨架、四个客户端、`models/` + Alembic 迁移、`schemas/`、
+> **进度**：D1–D14 完成（MVP 的功能范围走完，剩 D15 的文档与部署）—— 骨架、四个客户端、`models/` + Alembic 迁移、`schemas/`、
 > `services/`、`providers/`、`tasks/`（含每小时的告警巡检）、`rules/`（余额可撑
 > 天数、指标周同比异动）、`notifiers/`、`auth/`（自签 HMAC token + 授权作用域）
 > 和 `llm/`（适配器、输出契约、提示词版本、成本记录）都已落地，另有 `seed.py`
-> 提供脱敏示例数据、两个前端（`client/` 与 `admin/`）。**下一段是 D14 的日报**，
-> 它是编排，不新增分层。
+> 提供脱敏示例数据、两个前端（`client/` 与 `admin/`）。日报（D14）是纯编排，
+> 没有新增分层：`services/report.py` 把 `daily_metrics` 的数字、`actions` 的
+> 操作记录、`alerts` 的摘要凑成一份快照，再交给 `llm/` 写那一行人话。
 
 ---
 
@@ -176,7 +177,7 @@ celery -A adpilot.tasks.app worker
 ▸     → services.normalize：快照 → PG daily_metrics（可拿快照重跑）
 ▸     → 失败：瞬时故障退避重试；数据不对 → reject 进 adpilot.dead 死信队列
 ▸     → rules 巡检 → 告警          （D7–D8，已进 beat_schedule）
-      → llm 撰写日报 → PG reports  （D14；llm/ 与操作记录已就位）
+▸     → llm 撰写日报 → PG reports  （D14：生成是同步接口，定时排期还没做）
   → worker_process_shutdown：关连接池、关事件循环
 ```
 
@@ -238,6 +239,7 @@ result backend 由接口去查（`GET /api/tasks/{id}`）。worker **不回调**
 | 一个后台任务 | `tasks/<domain>.py` | `tasks/normalize.py`；任务体只做编排，逻辑仍在 `services/`。**别忘了在 `tasks/app.py` 的 `TASK_MODULES` 里加一行**，否则 worker 认不出这个任务（有门禁盯着） |
 | 一个定时任务 | 同上 + `db/broker.py` 的 `beat_schedule` | 排期要显式指定 `queue`，否则消息进默认队列没人取。跑起来还要有一个 beat 进程 |
 | 一个通知通道 | `notifiers/<channel>.py` | `notifiers/webhook.py`；只管送出去，失败返回 `False` 不抛 |
+| 一份**日报** | `services/report.py` 的三个入口 | 生成 = 先落数字快照再调模型，**顺序不能反**（反了就变成「模型挂了整份日报都没了」）。发布的两条硬校验在服务层，不在 UI |
 | 一次 **LLM 调用** | `llm/prompts.py` 加提示词 + `llm/contracts.py` 加契约，调用走 `services/llm.py` 的 `run` | 🔴 **别直接 import `llm.structured`** —— 绕过 `services/llm.py` 就等于绕过记账和每日闸门。输出契约里**不许有数字字段** |
 | 一个**内部**接口 | 同「一个接口」，另外去 `main.py` 那个循环里加一行 | 认证统一在那里挂，漏了会被 `tests/test_auth_guard.py` 拦下 |
 | 一个**客户端**接口 | `api/portal.py` + `schemas/portal.py` | 必须声明 `ClientScopeDep`，服务函数的 `client_id` 必须是**必填关键字参数**。两道门禁见 [`business/portal.md`](../business/portal.md) |

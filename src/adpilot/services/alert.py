@@ -35,12 +35,20 @@ from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from adpilot.config import Settings
+from adpilot.llm import contracts as llm_contracts
+from adpilot.llm import prompts
+from adpilot.llm.base import LLMProvider
 from adpilot.models.ad_account import AdAccount
 from adpilot.models.alert import Alert, AlertKind, AlertStatus
+from adpilot.models.llm_call import LLMCall
 from adpilot.notifiers import webhook
 from adpilot.rules import anomaly as anomaly_rules
+from adpilot.services import action as action_service
+from adpilot.services import ad_account as ad_account_service
 from adpilot.services import balance as balance_service
 from adpilot.services import daily_metric as daily_metric_service
+from adpilot.services import llm as llm_service
+from adpilot.services.exceptions import NotFoundError
 
 log = structlog.get_logger(__name__)
 
@@ -401,3 +409,129 @@ def _plain(value: Decimal | None) -> str | None:
     不是原来那个数了。
     """
     return None if value is None else str(value)
+
+
+#: 诊断时往前看几天的操作记录。7 天盖住一个完整的周内/周末周期，也盖得住「上周
+#: 五调了预算、这周一才显出来」这种滞后 —— 而异动的原因十有八九就在这段操作里。
+DIAGNOSIS_LOOKBACK_DAYS = 7
+
+
+@dataclass(frozen=True, slots=True)
+class DiagnosisOutcome:
+    """一次诊断的结果。
+
+    `diagnosis is None` 表示模型这次没答上来（挂了，或者连着几次输出都不合格）。
+    **这不是异常** —— 告警本身、以及它带的那些数字全都还在，诊断只是锦上添花。
+    """
+
+    diagnosis: llm_contracts.Diagnosis | None
+
+    #: 这次调用的记账行。失败时靠它去 `llm_calls` 查为什么。
+    call: LLMCall
+
+
+async def diagnose(
+    session: AsyncSession,
+    settings: Settings,
+    *,
+    alert_id: int,
+    provider: LLMProvider | None = None,
+) -> DiagnosisOutcome:
+    """解释一条告警：**大概率**是什么原因、接下来该核实什么。
+
+    🔴 **不自动调用，运营点一下才诊断**（[设计][d]第七节）。理由是告警的构成：
+    大部分一眼就知道原因（余额低了 → 充钱；花费涨了 → 昨天调过预算），给每条都
+    自动花一次钱，钱就花在了不需要解释的那些上面 —— 而诊断的价值恰恰在难解释的
+    少数。
+
+    输出里**没有任何「把预算改成 X」这样的字段**（`llm/contracts.py` 的
+    `Diagnosis`），那是设计文档第五节第 1 条那条硬边界的形态：它给方向，不给指令，
+    更不会有人替它执行。
+
+    [d]: ../../../docs/design/2026-08-21-llm-reports.md
+    """
+    alert = await session.get(Alert, alert_id)
+    if alert is None:
+        raise NotFoundError(f"告警不存在：{alert_id}")
+
+    account = await ad_account_service.get(session, alert.account_id)
+    end = _yesterday(account)
+    actions = await action_service.list_in_window(
+        session,
+        account=account,
+        start=end - timedelta(days=DIAGNOSIS_LOOKBACK_DAYS - 1),
+        end=end,
+    )
+
+    outcome = await llm_service.run(
+        session,
+        settings,
+        prompt=prompts.DIAGNOSIS,
+        payload=llm_contracts.DiagnosisInput(
+            account_name=account.name,
+            alert_kind=alert.kind,
+            alert_message=alert.message,
+            context=_diagnosis_context(alert),
+            actions=[
+                llm_contracts.ActionLine(
+                    performed_at=row.performed_at.isoformat(),
+                    summary=row.summary,
+                    reason=row.reason,
+                )
+                for row in actions
+            ],
+        ),
+        output_type=llm_contracts.Diagnosis,
+        account_id=account.id,
+        provider=provider,
+    )
+
+    log.info(
+        "alert_diagnosed",
+        alert_id=alert_id,
+        kind=alert.kind,
+        answered=outcome.output is not None,
+    )
+    return DiagnosisOutcome(diagnosis=outcome.output, call=outcome.call)
+
+
+def _diagnosis_context(alert: Alert) -> list[llm_contracts.MetricLine]:
+    """把 `alert.detail` 里那些数字翻译成模型看得懂的几行。
+
+    按 `kind` 分支而不是把 JSONB 整个倒给模型：`detail` 的键是英文缩写、值是裸
+    字符串，直接扔过去等于要求模型自己猜口径 —— 而它会猜，还会猜错。这一步是
+    显式的翻译（同 `services/report.py` 的 `_metric_lines`）。
+
+    认不出的种类给一行原始摘要就好，**不猜**：新加一种告警时这里没跟上，最坏的
+    结果应该是「诊断得笼统」，不是「诊断得煞有介事但是错的」。
+    """
+    detail = alert.detail
+
+    if alert.kind == AlertKind.BALANCE_LOW.value:
+        return [
+            llm_contracts.MetricLine(label="可撑天数", value=str(detail.get("days_left"))),
+            llm_contracts.MetricLine(
+                label="可用余额",
+                value=f"{detail.get('available')} {detail.get('currency', '')}".strip(),
+            ),
+            llm_contracts.MetricLine(
+                label="近期日均消耗", value=str(detail.get("avg_daily_spend"))
+            ),
+            llm_contracts.MetricLine(
+                label="告警阈值（天）", value=str(detail.get("threshold_days"))
+            ),
+        ]
+
+    if alert.kind == AlertKind.METRIC_ANOMALY.value:
+        return [
+            llm_contracts.MetricLine(label="指标", value=str(detail.get("metric"))),
+            llm_contracts.MetricLine(
+                label="当期值",
+                value=str(detail.get("current")),
+                change=f"较上周同日 {detail.get('direction')}",
+            ),
+            llm_contracts.MetricLine(label="上周同日", value=str(detail.get("baseline"))),
+            llm_contracts.MetricLine(label="对照日", value=str(detail.get("baseline_date"))),
+        ]
+
+    return [llm_contracts.MetricLine(label="告警摘要", value=alert.message)]

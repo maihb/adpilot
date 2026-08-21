@@ -18,9 +18,16 @@ from fastapi import APIRouter, Query, status
 
 from adpilot.api.balance import to_runway_response
 from adpilot.api.deps import SessionDep, SettingsDep
+from adpilot.api.errors import responses
 from adpilot.api.pagination import DEFAULT_PAGE_SIZE, PageParam, PageSizeParam
 from adpilot.models.alert import AlertStatus
-from adpilot.schemas.alert import AlertItem, AlertListResponse, SweepResponse
+from adpilot.schemas.alert import (
+    AlertItem,
+    AlertListResponse,
+    DiagnosisItem,
+    DiagnosisResponse,
+    SweepResponse,
+)
 from adpilot.schemas.balance import BalanceAlertListResponse
 from adpilot.services import alert as alert_service
 from adpilot.services import balance as balance_service
@@ -109,4 +116,43 @@ async def list_balance_alerts(
     return BalanceAlertListResponse(
         items=[to_runway_response(alert) for alert in found],
         total=len(found),
+    )
+
+
+@router.post(
+    "/alerts/{alert_id}/diagnose",
+    response_model=DiagnosisResponse,
+    operation_id="diagnoseAlert",
+    responses=responses(
+        status.HTTP_404_NOT_FOUND,
+        status.HTTP_429_TOO_MANY_REQUESTS,
+        status.HTTP_503_SERVICE_UNAVAILABLE,
+    ),
+)
+async def diagnose_alert(
+    alert_id: int,
+    session: SessionDep,
+    settings: SettingsDep,
+) -> DiagnosisResponse:
+    """让模型解释这条告警：大概率是什么原因、接下来该核实什么。
+
+    🔴 **按需调用，不自动。** 大部分告警一眼就知道原因（余额低了 → 充钱；花费涨了
+    → 昨天调过预算），给每条都自动花一次钱，钱就花在了不需要解释的那些上面 ——
+    而诊断的价值恰恰在难解释的少数（设计文档第七节）。
+
+    **每点一次就是一次真实的模型调用**（会计入每日上限，超了返回 429）。没配 LLM
+    时返回 503。模型没答上来时返回 **200 且 `diagnosis` 为 `null`** —— 那次调用
+    已经烧了 token 并落了账，抛异常会把那条账一起回滚掉。
+
+    输出里没有任何会被执行的东西：它给方向（「大概率是素材疲劳，建议换素材而不是
+    降价」），不给指令。
+    """
+    outcome = await alert_service.diagnose(session, settings, alert_id=alert_id)
+    return DiagnosisResponse(
+        diagnosis=(
+            DiagnosisItem.model_validate(outcome.diagnosis.model_dump())
+            if outcome.diagnosis is not None
+            else None
+        ),
+        llm_call_id=outcome.call.id,
     )

@@ -259,6 +259,55 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/portal/reports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Reports
+         * @description 我的日报，最近那天的在前。
+         *
+         *     🔴 **只有已发布的会出现在这里。** 草稿和「模型写完但还没人审」的那些一律看不
+         *     到 —— 那道人工闸门是数字正确性的最后一道防线（模型可能在散文里编一个百分比，
+         *     而没有任何机器判定拦得住）。条件写在服务层，不在这个 handler 里。
+         *
+         *     不按账户筛：客户要的是「最近的日报」，而按账户筛会多出一个需要校验归属的入口。
+         */
+        get: operations["listPortalReports"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/portal/reports/{report_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Report
+         * @description 一份日报的全文。
+         *
+         *     不属于自己的、以及**还没发布的**，一律 404 —— 不是 403。403 等于承认「那份
+         *     日报存在，只是不给你看」，而一份草稿存不存在本来就不该让客户知道。
+         */
+        get: operations["getPortalReport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/clients": {
         parameters: {
             query?: never;
@@ -669,6 +718,37 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/alerts/{alert_id}/diagnose": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Diagnose Alert
+         * @description 让模型解释这条告警：大概率是什么原因、接下来该核实什么。
+         *
+         *     🔴 **按需调用，不自动。** 大部分告警一眼就知道原因（余额低了 → 充钱；花费涨了
+         *     → 昨天调过预算），给每条都自动花一次钱，钱就花在了不需要解释的那些上面 ——
+         *     而诊断的价值恰恰在难解释的少数（设计文档第七节）。
+         *
+         *     **每点一次就是一次真实的模型调用**（会计入每日上限，超了返回 429）。没配 LLM
+         *     时返回 503。模型没答上来时返回 **200 且 `diagnosis` 为 `null`** —— 那次调用
+         *     已经烧了 token 并落了账，抛异常会把那条账一起回滚掉。
+         *
+         *     输出里没有任何会被执行的东西：它给方向（「大概率是素材疲劳，建议换素材而不是
+         *     降价」），不给指令。
+         */
+        post: operations["diagnoseAlert"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/ad-accounts/{account_id}/actions": {
         parameters: {
             query?: never;
@@ -701,6 +781,100 @@ export interface paths {
          *     的直接 422 —— 那样的记录永远不会出现在任何一期日报里。
          */
         post: operations["recordAction"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/ad-accounts/{account_id}/reports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Reports
+         * @description 某账户的日报，最近那天的在前。含各个状态 —— 这是运营的工作台。
+         */
+        get: operations["listReports"];
+        put?: never;
+        /**
+         * Generate Report
+         * @description 生成某一天的日报：先固定数字，再让模型写那一行人话。
+         *
+         *     **数字在这一刻固定下来，此后不随平台回填变化**（glossary 的「日报快照」）。
+         *     客户上周收到的日报今天再打开数字变了，比数字不够准更伤 —— 那是解释不清的。
+         *
+         *     **模型挂了或没配 LLM 不影响这个接口成功**：日报照样生成，状态停在 `draft`、
+         *     `llm_narrative` 为 `null`，人自己写那段话。数字部分是确定性的，不该被模型的
+         *     可用性绑架。
+         *
+         *     同一天重复调用会**重新生成**（覆盖数字和模型原文，并清掉人工修订 —— 数字变了，
+         *     基于旧数字写的那段话未必还成立）。**已发布的那份不能重新生成**，返回 409。
+         */
+        post: operations["generateReport"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/reports/{report_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Report
+         * @description 一份日报的全部内容，**两版人话都给**。
+         *
+         *     前端把 `llm_narrative` 预填进编辑框让人改，改完存进 `narrative` —— 两版都留着
+         *     才回答得了「这句话是模型写的还是人改的」。
+         */
+        get: operations["getReport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Revise Report
+         * @description 存下人工修订后的那一版，并盖上「人看过了」的戳。
+         *
+         *     🔴 **这一步不是走过场。** 模型可能在散文里写「成本上升了 40%」而实际是 24%，
+         *     而没有任何机器判定拦得住这件事（正则抽数字会被「四成」绕过去）—— 人是唯一的
+         *     防线，所以未经这一步的日报发不出去。
+         *
+         *     **`llm_narrative` 不会被动**：模型原文永不修改。已发布的日报改不了（409）。
+         */
+        patch: operations["reviseReport"];
+        trace?: never;
+    };
+    "/api/reports/{report_id}/publish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Publish Report
+         * @description 发布。发布之后客户端就看得到了，**而这一步收不回来**。
+         *
+         *     两条硬校验，都在服务层（不是 UI 提示）：**必须经人工修订**、**操作记录不能
+         *     为空**。任一条不满足返回 409，消息里说清缺的是哪一件。
+         *
+         *     发布之后这份日报不再变：既不能改、也不能重新生成。数字后来修正了，在新一期
+         *     日报里说明 —— 客户手上那份截图不会自己更新，而「同一天的日报今天看和昨天看
+         *     不一样」会让人怀疑全部数字。
+         */
+        post: operations["publishReport"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1194,6 +1368,37 @@ export interface components {
             /** Detail */
             detail?: string | null;
         };
+        /**
+         * DiagnosisItem
+         * @description 一条告警的解释。**只有文字，没有会被执行的东西。**
+         *
+         *     与 `llm/contracts.py` 的 `Diagnosis` 同构，但不复用那个类：LLM 层的契约跟着
+         *     提示词演进，对外 API 的契约要稳定（设计文档第二节）。
+         */
+        DiagnosisItem: {
+            /** Likely Causes */
+            likely_causes: string[];
+            /** Suggested Checks */
+            suggested_checks: string[];
+            /** Suggestion */
+            suggestion: string;
+        };
+        /**
+         * DiagnosisResponse
+         * @description 诊断的结果。
+         *
+         *     ⚠️ **`diagnosis` 为 `null` 是正常返回，不是错误。** 模型这次没答上来（挂了，
+         *     或者连着几次输出都不合格）时走这条路 —— 接口仍然 200，因为告警本身和它带的
+         *     那些数字全都还在，诊断只是锦上添花。
+         *
+         *     为什么不回 503：那次调用**已经烧了 token 并落了账**，而抛异常会让整个事务
+         *     回滚、把那条账一起抹掉（`services/llm.py` 的模块 docstring 讲了这条）。
+         */
+        DiagnosisResponse: {
+            diagnosis: components["schemas"]["DiagnosisItem"] | null;
+            /** Llm Call Id */
+            llm_call_id: number;
+        };
         /** ErrorResponse */
         ErrorResponse: {
             /** Detail */
@@ -1499,6 +1704,86 @@ export interface components {
             name: string;
         };
         /**
+         * PortalReportItem
+         * @description 客户看到的一份日报。
+         *
+         *     🔴 **没有 `llm_narrative`，也没有 `status`。** 客户看的是人确认过的那一版，
+         *     模型原文是内部的审计信息（用来回答「这句话是模型写的还是人改的」），不该出现在
+         *     客户端 —— 那等于把「这段话是 AI 写的、我们只是过了一眼」直接摆出去。有一条门禁
+         *     盯着这件事（`tests/test_reports_api.py`）。
+         *
+         *     数字是**生成那一刻的快照**，不随平台回填变化。派生指标（CPA / CTR / ROAS）由
+         *     后端按 [glossary](../../../docs/business/glossary.md) 的公式现算，和看板共用
+         *     同一份实现；金额和比率一律是**字符串**，前端不要用浮点解析
+         *     （`client/src/utils/` 是唯一允许转换的地方）。
+         */
+        PortalReportItem: {
+            /** Baseline Date */
+            baseline_date: string | null;
+            /** Baseline Spend */
+            baseline_spend: string | null;
+            /** Baseline Conversions */
+            baseline_conversions: string | null;
+            /** Spend */
+            spend: string;
+            /** Impressions */
+            impressions: number;
+            /** Clicks */
+            clicks: number;
+            /** Conversions */
+            conversions: string;
+            /** Revenue */
+            revenue: string;
+            /** Id */
+            id: number;
+            /** Account Id */
+            account_id: number;
+            /**
+             * Stat Date
+             * Format: date
+             */
+            stat_date: string;
+            /** Currency */
+            currency: string;
+            /** Timezone */
+            timezone: string;
+            narrative: components["schemas"]["ReportNarrative"];
+            /** Actions */
+            actions: components["schemas"]["ReportActionItem"][];
+            /** Alerts */
+            alerts: string[];
+            /**
+             * Published At
+             * Format: date-time
+             */
+            published_at: string;
+            /**
+             * Baseline Cpa
+             * @description 对照期的 CPA。缺任何一项、或那天没有转化，都是 `None`（无定义）。
+             */
+            readonly baseline_cpa: string | null;
+            /** Cpm */
+            readonly cpm: string | null;
+            /** Cpc */
+            readonly cpc: string | null;
+            /**
+             * Ctr
+             * @description 点击率存小数不存百分数，展示时再乘 100。
+             */
+            readonly ctr: string | null;
+            /** Cpa */
+            readonly cpa: string | null;
+            /** Roas */
+            readonly roas: string | null;
+        };
+        /** PortalReportListResponse */
+        PortalReportListResponse: {
+            /** Items */
+            items: components["schemas"]["PortalReportItem"][];
+            /** Total */
+            total: number;
+        };
+        /**
          * PortalRunwayResponse
          * @description 余额还能撑多久。
          *
@@ -1540,6 +1825,161 @@ export interface components {
             /** Dependencies */
             dependencies: components["schemas"]["DependencyStatus"][];
         };
+        /**
+         * ReportActionItem
+         * @description 日报里「本期做了什么」的一条。是**生成那一刻的副本**，不是关联查询。
+         */
+        ReportActionItem: {
+            /** Performed At */
+            performed_at: string;
+            /** Kind */
+            kind: string;
+            /** Summary */
+            summary: string;
+            /** Reason */
+            reason: string;
+            /** Object Name */
+            object_name?: string | null;
+        };
+        /**
+         * ReportGenerateRequest
+         * @description 生成一份日报。
+         */
+        ReportGenerateRequest: {
+            /**
+             * Stat Date
+             * Format: date
+             */
+            stat_date: string;
+        };
+        /**
+         * ReportItem
+         * @description 运营看到的一份日报：**两版人话都给**。
+         *
+         *     继承 `DerivedMetrics` 而不是自己声明那五个数字：CPA / CTR / ROAS 的公式全项目
+         *     只有一份，日报和看板上的同一个 CPA 必须是同一个数。
+         */
+        ReportItem: {
+            /** Baseline Date */
+            baseline_date: string | null;
+            /** Baseline Spend */
+            baseline_spend: string | null;
+            /** Baseline Conversions */
+            baseline_conversions: string | null;
+            /** Spend */
+            spend: string;
+            /** Impressions */
+            impressions: number;
+            /** Clicks */
+            clicks: number;
+            /** Conversions */
+            conversions: string;
+            /** Revenue */
+            revenue: string;
+            /** Id */
+            id: number;
+            /** Account Id */
+            account_id: number;
+            /**
+             * Stat Date
+             * Format: date
+             */
+            stat_date: string;
+            status: components["schemas"]["ReportStatus"];
+            /** Currency */
+            currency: string;
+            /** Timezone */
+            timezone: string;
+            /** Actions Snapshot */
+            actions_snapshot: components["schemas"]["ReportActionItem"][];
+            /** Alerts Snapshot */
+            alerts_snapshot: string[];
+            llm_narrative: components["schemas"]["ReportNarrative"] | null;
+            narrative: components["schemas"]["ReportNarrative"] | null;
+            /** Llm Call Id */
+            llm_call_id: number | null;
+            /**
+             * Generated At
+             * Format: date-time
+             */
+            generated_at: string;
+            /** Reviewed At */
+            reviewed_at: string | null;
+            /** Reviewer */
+            reviewer: string | null;
+            /** Published At */
+            published_at: string | null;
+            /**
+             * Baseline Cpa
+             * @description 对照期的 CPA。缺任何一项、或那天没有转化，都是 `None`（无定义）。
+             */
+            readonly baseline_cpa: string | null;
+            /** Cpm */
+            readonly cpm: string | null;
+            /** Cpc */
+            readonly cpc: string | null;
+            /**
+             * Ctr
+             * @description 点击率存小数不存百分数，展示时再乘 100。
+             */
+            readonly ctr: string | null;
+            /** Cpa */
+            readonly cpa: string | null;
+            /** Roas */
+            readonly roas: string | null;
+        };
+        /** ReportListResponse */
+        ReportListResponse: {
+            /** Items */
+            items: components["schemas"]["ReportItem"][];
+            /** Total */
+            total: number;
+        };
+        /**
+         * ReportNarrative
+         * @description 日报里那段人话：一段总述 + 几条要点 + 几条建议。
+         *
+         *     **与 `llm/contracts.py` 的 `DailyReportNarrative` 同构**（`tests/test_reports_api.py`
+         *     有一条门禁盯着）。同构是「两版能对比」的前提：人改的和模型写的必须是同一种
+         *     形状，否则「这句话是谁写的」就没法逐段回答。
+         *
+         *     但**不复用那个类**：LLM 层的契约跟着提示词演进，对外 API 的契约要稳定，两者
+         *     该分开演进（设计文档第二节）。中间那道翻译在 `services/report.py`。
+         *
+         *     🔴 **没有数字字段**，理由同 LLM 那边：日报里的数字全部来自快照列，这里只有
+         *     措辞。人工修订时也一样 —— 要改数字得去改数据再重新生成，不能在文字里改。
+         */
+        ReportNarrative: {
+            /** Summary */
+            summary: string;
+            /** Highlights */
+            highlights?: string[];
+            /** Next Steps */
+            next_steps?: string[];
+        };
+        /**
+         * ReportReviseRequest
+         * @description 存下人工修订后的那一版。
+         *
+         *     **不能改数字，也不能改 LLM 原文** —— 前者要改数据再重新生成，后者永不修改。
+         */
+        ReportReviseRequest: {
+            narrative: components["schemas"]["ReportNarrative"];
+            /** Reviewer */
+            reviewer?: string | null;
+        };
+        /**
+         * ReportStatus
+         * @description 日报的生命周期。三个状态，转换只有三条边。
+         *
+         *     ```
+         *     draft ──LLM 写完──▶ pending_review ──发布──▶ published ──▶ 客户可见
+         *       ▲                      ▲
+         *       └ LLM 失败时停在这里    └ 人工修订之后一定到这里（无论从哪来）
+         *     ```
+         * @enum {string}
+         */
+        ReportStatus: "draft" | "pending_review" | "published";
         /**
          * SweepResponse
          * @description 一轮巡检的结果。数字都是**告警条数**，不是账户数。
@@ -1987,6 +2427,80 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PortalAlertListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    listPortalReports: {
+        parameters: {
+            query?: {
+                /** @description 页码，从 1 起 */
+                page?: number;
+                /** @description 每页条数，上限 100 */
+                page_size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortalReportListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    getPortalReport: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                report_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortalReportItem"];
+                };
+            };
+            /** @description 资源不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
             /** @description Validation Error */
@@ -3044,6 +3558,73 @@ export interface operations {
             };
         };
     };
+    diagnoseAlert: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                alert_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DiagnosisResponse"];
+                };
+            };
+            /** @description 没带 token、token 无效或已过期 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description 超过了本地设置的用量上限 */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 服务端缺少必要配置（认证、LLM 等） */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     listActions: {
         parameters: {
             query?: {
@@ -3147,6 +3728,291 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    listReports: {
+        parameters: {
+            query?: {
+                /** @description 页码，从 1 起 */
+                page?: number;
+                /** @description 每页条数，上限 100 */
+                page_size?: number;
+            };
+            header?: never;
+            path: {
+                account_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReportListResponse"];
+                };
+            };
+            /** @description 没带 token、token 无效或已过期 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    generateReport: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                account_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReportGenerateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReportItem"];
+                };
+            };
+            /** @description 没带 token、token 无效或已过期 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 与已有数据冲突 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    getReport: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                report_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReportItem"];
+                };
+            };
+            /** @description 没带 token、token 无效或已过期 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reviseReport: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                report_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReportReviseRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReportItem"];
+                };
+            };
+            /** @description 没带 token、token 无效或已过期 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 与已有数据冲突 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    publishReport: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                report_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReportItem"];
+                };
+            };
+            /** @description 没带 token、token 无效或已过期 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 与已有数据冲突 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

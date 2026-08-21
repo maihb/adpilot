@@ -32,6 +32,7 @@
 | 金额 / 时区 / 类型 / 异步 / 测试 / 日志 / 配置密钥 / **改完必做清单** | [`docs/code-rules/conventions.md`](docs/code-rules/conventions.md) |
 | **加一个接口**（含可照抄的四步与踩坑速查） | [`docs/code-rules/api.md`](docs/code-rules/api.md) |
 | 分支 / 提交信息 / **推送前自检** / 需明确指令的操作 | [`docs/code-rules/git-workflow.md`](docs/code-rules/git-workflow.md) |
+| **改日报 / 生成、修订、发布**（快照固定与两条发不出去的校验） | [`docs/business/reports.md`](docs/business/reports.md) |
 | **登记投放操作 / 日报「本期做了什么」的来源** | [`docs/business/actions.md`](docs/business/actions.md) |
 | **调 LLM / 加提示词 / 查调用成本**（三条硬边界各被什么拦着） | [`docs/business/llm.md`](docs/business/llm.md) |
 | **加一个后台任务**（重试与死信怎么分流、worker 里的两个致命坑） | [`docs/business/tasks.md`](docs/business/tasks.md) |
@@ -106,6 +107,8 @@
 | **LLM 输出里不许有数字字段** | `tests/test_llm.py`：扫 `llm/contracts.py` 的输出模型，字段类型只能是 `str` / `list[str]`。日报里的数字全部由代码从 `daily_metrics` 算，加一个 `cpa: Decimal` 进去，「模型把 CPA 编成另一个值」就从**结构上不可能**退化成「但愿它别」，而那天不会有任何东西报错。⚠️ 它**拦不住模型在散文里编一个百分比** —— 那道防线是人工修订 |
 | **提示词改了必须升版本号** | 同上那个文件：对提示词正文算指纹再比对。提示词改一次日报口径就变一次，没有版本号，三个月后没法把「这份日报」和「当时那版口径」对上。被它拦到时**先加版本号**，别直接更新指纹 |
 | **LLM 层够不着数据库** | `lint-imports`：`llm` 压在 `models`/`schemas`/`services`/`db` **之下**，在那一层写 `select(...)`、存日报、调业务函数全都过不了契约。这是「LLM 只解释不决策」的机器形态 —— 提示词可以被绕过，且绕过时不会报错 |
+| **客户端不许看到模型原文** | `tests/test_reports_api.py` 扫 OpenAPI：`PortalReportItem` 里不许有 `llm_narrative`（也不许有 `status`）。模型原文是内部审计信息（回答「这句话是模型写的还是人改的」），把它下发给客户等于把「这段话是 AI 写的、我们只过了一眼」直接摆出去 |
+| **两版人话必须同构** | 同上那个文件：`ReportNarrative` 与 `DailyReportNarrative` 的字段集合必须一致。两版都存是为了回答「哪一段是谁写的」，形状一旦不同，那个问题就只能靠肉眼比对了。两个类**刻意不复用**（LLM 契约跟提示词演进、API 契约要稳定），所以只能靠测试盯 |
 | **示例邀请码不许写死** | `tests/test_seed.py`：seed 两次发出的码必须不同。写死一个「demo 码」等于往公开仓库里放一把人人皆知的钥匙 |
 | 数据卷不被顺手删掉 | 守卫拦下 `docker compose down -v` |
 | **push 要人明确说** | `settings.json` 里 `Bash(git push:*)` 是 deny。用户说「提交」只意味着 commit |
@@ -168,7 +171,10 @@ RUN_INTEGRATION=1 uv run pytest -m integration   # 需要 compose 那套环境 +
 
 # 脱敏示例数据。只添不改（重复跑安全），ENVIRONMENT=prod 时拒绝执行且**没有
 # --force**。四个示例账户各演示一种规则结局，跑完巡检应当恰好两条告警 ——
-# 那个数字有测试盯着（tests/test_seed.py）。
+# 那个数字有测试盯着（tests/test_seed.py）。还会给每个账户造一条操作记录和一份
+# **已发布的昨日日报**（走真链路，顺带验着那两条发布校验）。
+# 🔴 seed **绝不调用 LLM**，哪怕配了 LLM_BASE_URL —— 灌示例数据不该花钱，
+# 那份日报里的人话是写死的示例文案。同样有测试盯着。
 uv run python -m adpilot.seed
 
 uv run alembic upgrade head                      # 把库升到最新 schema

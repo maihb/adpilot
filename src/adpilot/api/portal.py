@@ -28,6 +28,7 @@ from fastapi import APIRouter, Query, status
 from adpilot.api.deps import ClientScopeDep, SessionDep
 from adpilot.api.errors import responses
 from adpilot.api.pagination import DEFAULT_PAGE_SIZE, PageParam, PageSizeParam
+from adpilot.models.report import Report
 from adpilot.schemas.portal import (
     PortalAccountItem,
     PortalAccountListResponse,
@@ -36,13 +37,17 @@ from adpilot.schemas.portal import (
     PortalMetricDay,
     PortalMetricsResponse,
     PortalProfileResponse,
+    PortalReportItem,
+    PortalReportListResponse,
     PortalRunwayResponse,
 )
+from adpilot.schemas.report import ReportActionItem, ReportNarrative
 from adpilot.services import ad_account as ad_account_service
 from adpilot.services import alert as alert_service
 from adpilot.services import balance as balance_service
 from adpilot.services import client as client_service
 from adpilot.services import daily_metric as daily_metric_service
+from adpilot.services import report as report_service
 
 router = APIRouter(prefix="/portal", tags=["portal"])
 
@@ -203,4 +208,84 @@ async def list_alerts(
     return PortalAlertListResponse(
         items=[PortalAlertItem.model_validate(row) for row in rows],
         total=total,
+    )
+
+
+@router.get(
+    "/reports",
+    response_model=PortalReportListResponse,
+    operation_id="listPortalReports",
+)
+async def list_reports(
+    client_id: ClientScopeDep,
+    session: SessionDep,
+    page: PageParam = 1,
+    page_size: PageSizeParam = DEFAULT_PAGE_SIZE,
+) -> PortalReportListResponse:
+    """我的日报，最近那天的在前。
+
+    🔴 **只有已发布的会出现在这里。** 草稿和「模型写完但还没人审」的那些一律看不
+    到 —— 那道人工闸门是数字正确性的最后一道防线（模型可能在散文里编一个百分比，
+    而没有任何机器判定拦得住）。条件写在服务层，不在这个 handler 里。
+
+    不按账户筛：客户要的是「最近的日报」，而按账户筛会多出一个需要校验归属的入口。
+    """
+    rows, total = await report_service.list_for_client(
+        session,
+        client_id=client_id,
+        page=page,
+        page_size=page_size,
+    )
+    return PortalReportListResponse(
+        items=[_to_portal_report(row) for row in rows],
+        total=total,
+    )
+
+
+@router.get(
+    "/reports/{report_id}",
+    response_model=PortalReportItem,
+    operation_id="getPortalReport",
+    responses=responses(status.HTTP_404_NOT_FOUND),
+)
+async def get_report(
+    report_id: int,
+    client_id: ClientScopeDep,
+    session: SessionDep,
+) -> PortalReportItem:
+    """一份日报的全文。
+
+    不属于自己的、以及**还没发布的**，一律 404 —— 不是 403。403 等于承认「那份
+    日报存在，只是不给你看」，而一份草稿存不存在本来就不该让客户知道。
+    """
+    report = await report_service.get_for_client(session, client_id=client_id, report_id=report_id)
+    return _to_portal_report(report)
+
+
+def _to_portal_report(report: Report) -> PortalReportItem:
+    """把一行日报摊成客户端出参。
+
+    显式构造而不是 `model_validate`，是为了让**丢掉哪些字段**这件事看得见：
+    `llm_narrative`（模型原文）和 `status` 都不下发。前者是内部的审计信息 ——
+    把它交给客户，等于把「这段话是 AI 写的、我们只过了一眼」直接摆出去。
+    """
+    return PortalReportItem(
+        id=report.id,
+        account_id=report.account_id,
+        stat_date=report.stat_date,
+        currency=report.currency,
+        timezone=report.timezone,
+        spend=report.spend,
+        impressions=report.impressions,
+        clicks=report.clicks,
+        conversions=report.conversions,
+        revenue=report.revenue,
+        baseline_date=report.baseline_date,
+        baseline_spend=report.baseline_spend,
+        baseline_conversions=report.baseline_conversions,
+        # 已发布 ⇒ 一定经过人工修订（发布时的硬校验），所以这里一定不是 None。
+        narrative=ReportNarrative.model_validate(report.narrative),
+        actions=[ReportActionItem.model_validate(row) for row in report.actions_snapshot],
+        alerts=list(report.alerts_snapshot),
+        published_at=report.published_at,
     )

@@ -25,6 +25,7 @@ from adpilot.api import (
     imports,
     invite,
     portal,
+    report,
     task,
 )
 from adpilot.api.deps import require_operator
@@ -98,6 +99,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         balance.router,
         alert.router,
         action.router,
+        report.router,
         task.router,
     ):
         _include_operator_router(app, router, settings)
