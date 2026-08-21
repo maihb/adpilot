@@ -238,6 +238,82 @@ def test_report_status_names_match_the_backend_enum() -> None:
     assert checked, "一份 REPORT_STATUS_NAMES 都没扫到 —— 是不是改名了？改了就把这条测试一起改"
 
 
+def test_pages_do_not_swallow_the_backend_message() -> None:
+    """🔴 页面不许自己判错误类型，一律走 `reason()`。
+
+    这条守的是一个**跑出来才发现**的 bug：五个页面七处写着
+    `error instanceof NeedsRedo ? error.message : '操作失败'`，而业务错误抛的是
+    `ApiError` —— 于是后端 409 里那句「这一期没有任何操作记录，发不出去。先登记
+    当天做过的调整，再重新生成日报」被吞成一句「发布失败」，运营只能来问人。
+
+    这个项目的后端是**刻意把 `detail` 写成能指导操作的**（认不出日期列时列出表头、
+    日报发不出去时说清缺的是哪一件），所以「原样显示」不是礼貌，是那些消息唯一的
+    用处。`reason()` 本身的行为由 `admin/src/api/request.test.ts` 钉着，这里守的是
+    **调用点** —— 真正出错的地方一直是调用点，不是那个函数。
+    """
+    offenders = [
+        f"{path.relative_to(ADMIN_SRC.parent)}:{lineno}"
+        for path in _sources(ADMIN_SRC, "pages", "components")
+        for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1)
+        if not _COMMENT_LINE.match(line) and "instanceof NeedsRedo" in line
+    ]
+
+    assert not offenders, (
+        "别在页面里自己判错误类型 —— 那样会把后端那句能指导操作的话吞掉。"
+        "改用 api/request.ts 的 reason(error, '兜底文案')：\n" + "\n".join(offenders)
+    )
+
+
+def test_the_report_screen_does_not_render_an_action_timestamp() -> None:
+    """🔴 日报详情页不许显示操作记录的时刻。
+
+    `performed_at` 是**真实时刻**，而客户端的 `formatInstant` 按手机本地时区渲染 ——
+    账户时区（洛杉矶）08-19 中午的一次调整，在 UTC+8 的手机上会显示成
+    「08-20 03:00」，于是一份 08-19 的日报里赫然出现 08-20 的操作，客户只会以为
+    我们记错了日子。**跑起来才看得见**，静态检查一个字都不会说。
+
+    日报本来就已经限定了是哪一天，几点做的对解释效果没有帮助 —— 不值得为它引入一次
+    跨时区渲染。这条挡的是「顺手把时间加回去」那个很自然的冲动。
+
+    `published_at` 不在此列：那是运维时刻，按看的人本地时区显示才是对的。
+    """
+    page = CLIENT_SRC / "pages" / "report" / "report.vue"
+    assert page.is_file(), "日报详情页改名了？改了就把这条测试一起改"
+
+    rendered = [
+        f"{page.name}:{lineno}"
+        for lineno, line in enumerate(page.read_text(encoding="utf-8").splitlines(), start=1)
+        if not _COMMENT_LINE.match(line) and "action.performed_at" in line
+    ]
+
+    assert not rendered, (
+        "日报详情页在渲染操作时刻。performed_at 按手机时区渲染会跨天 —— "
+        "一份 08-19 的日报里会出现 08-20 的操作：\n" + "\n".join(rendered)
+    )
+
+
+def test_the_comparison_footnote_checks_the_result_not_the_baseline() -> None:
+    """🔴 「这期不做环比」那句脚注，判据必须是**有没有算出环比**。
+
+    判「有没有对照期」是不够的：对照期存在、但那天花费是 0 时（暂停投放的账户就是
+    这样），除法同样没有意义 —— 于是八格环比一个都不显示，而脚注也不显示，客户
+    看不到任何解释，只会觉得哪里没加载出来。这个差别同样只有跑起来才看得见。
+    """
+    page = CLIENT_SRC / "pages" / "report" / "report.vue"
+    source = page.read_text(encoding="utf-8")
+
+    verdict = [
+        line
+        for line in source.splitlines()
+        if "noComparison" in line and "=" in line and "computed" in line
+    ]
+    assert verdict, "日报页没有 noComparison 这个判据了 —— 改名了就把这条测试一起改"
+    assert "baseline_date" not in verdict[0], (
+        "环比脚注的判据回到了「有没有对照期」。对照期存在但值为 0 时同样算不出环比，"
+        f"那时客户看不到任何解释：\n  {verdict[0].strip()}"
+    )
+
+
 def test_generated_types_are_committed() -> None:
     """两个前端生成的类型都必须**进 git**。
 

@@ -44,9 +44,9 @@ export class NeedsRedo extends Error {
  * 后端那句话吞掉 —— 而错误分支恰恰是最少被走到、最晚被发现的地方。
  */
 export function reason(error: unknown, fallback: string): string {
-  if (error instanceof NeedsRedo || error instanceof ApiError) {
-    return error.message
-  }
+  // `ApiError` 和 `NeedsRedo` 都继承 `Error`，所以这一行就够了 —— 再显式判一次那
+  // 两个类型是冗余的（写过一版，被单测「改了却不红」逼出来的）。`fallback` 只在
+  // 抛出来的东西**根本不是 Error** 时用得上。
   return error instanceof Error ? error.message : fallback
 }
 
