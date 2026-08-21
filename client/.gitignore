@@ -1,0 +1,27 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+.DS_Store
+dist
+*.local
+
+# Editor directories and files
+.idea
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+# 从后端导出的中间产物（`make openapi` 生成）。
+#
+# ⚠️ src/api/generated/ 下那份 .ts **是要进 git 的** —— CI 拿
+# `git diff --exit-code` 判后端有没有改过出参形状而前端没跟上，不进 git 就无从
+# 比起。这里排除的只是导出它用的那份 json。
+openapi.json

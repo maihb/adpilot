@@ -48,6 +48,49 @@ jobs:
       - name: Unit tests
         run: uv run pytest --cov=adpilot --cov-report=term-missing
 
+  frontend:
+    name: Client types and unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+
+      # 导出 openapi.json 要能 import adpilot。这一步不连任何外部服务，也不需要
+      # 凭据 —— dev 环境下 Settings 允许空值，而这里只是把应用对象构造出来。
+      - name: Install backend dependencies
+        run: uv sync --frozen --all-extras
+
+      - name: Install client dependencies
+        run: npm --prefix client ci
+
+      - name: Regenerate API types from the backend
+        run: make openapi
+
+      # 🔴 这一条是前端唯一的契约门禁：后端改了出参形状而没同步前端类型，这里红。
+      # 前端不做 E2E（设计文档第八节），所以「契约还对不对」只剩这一处机器保证。
+      - name: Client types are in sync with the backend
+        run: git diff --exit-code client/src/api/generated
+
+      # 上一步保证类型是新的，这一步保证页面确实按新类型写。
+      - name: Type check
+        run: npm --prefix client run type-check
+
+      # 只测那几个「算错了不会报错」的纯函数（金额的 null 三态、时间线缺口、
+      # 票的有效期判定）。页面渲染不测。
+      - name: Unit tests
+        run: npm --prefix client test
+
   integration:
     name: Integration tests
     runs-on: ubuntu-latest

@@ -26,12 +26,12 @@ COMPOSE ?= docker compose
 
 .DEFAULT_GOAL := help
 
-.PHONY: help bootstrap env setup dev worker beat seed lint fmt types imports test test-int check migrate revision up rebuild down logs ps
+.PHONY: help bootstrap env setup dev worker beat seed lint fmt types imports test test-int check migrate revision up rebuild down logs ps openapi client client-check
 
 help: ## 显示这份清单
 	@awk 'BEGIN {FS = ":.*##"} \
 		/^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5); next } \
-		/^[a-zA-Z_-]+:.*##/ { printf "  \033[36m%-10s\033[0m %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
+		/^[a-zA-Z_-]+:.*##/ { printf "  \033[36m%-13s\033[0m %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
 	@echo ""
 
 ##@ 新机器上手
@@ -118,6 +118,31 @@ test-int: ## 集成测试，需要 make up 那套环境 + 先 make migrate
 	RUN_INTEGRATION=1 $(UV) run pytest -m integration
 
 check: lint types imports test ## 推送前跑这条：CI 卡的五道门禁，一次跑完
+
+##@ 客户端（uni-app）
+
+# 后端改了出参形状之后**必须**跑它。CI 的 frontend job 会用 git diff --exit-code
+# 判生成出来的 .ts 有没有跟着变，不同步就红 —— 这是前后端同仓库换来的主要好处，
+# 分仓的话这条只能靠人盯。
+#
+# 导出走离线的 `app.openapi()`，**不起服务**。起服务再 curl /openapi.json 那条路
+# 有两个问题：它要连数据库（lifespan 会开连接池），而且那个路由在生产环境本来就是
+# 关掉的（main.py 里 openapi_url=None）。离线这条不触发 lifespan、也不读那个路由，
+# 于是不需要任何依赖、任何凭据。
+openapi: ## 导出 openapi.json 并重新生成前端 TS 类型
+	$(UV) run python -c "import json,sys; from adpilot.main import create_app; json.dump(create_app().openapi(), sys.stdout, ensure_ascii=False)" > client/openapi.json
+	npm --prefix client run gen:api
+
+# H5 走 vite 的 dev proxy 连后端（见 client/vite.config.ts），所以要先 make dev。
+# 微信小程序端是 npm --prefix client run dev:mp-weixin，产物用微信开发者工具打开。
+client: ## 起客户端 H5 开发服务器（先 make up + make dev）
+	npm --prefix client run dev:h5
+
+# 客户端那两道门禁。type-check 吃的是上面生成的类型，所以后端改了形状而没跑
+# make openapi 的话，会在这里表现成「前端用了不存在的字段」。
+client-check: ## 客户端门禁：vue-tsc + 纯函数单测
+	npm --prefix client run type-check
+	npm --prefix client test
 
 ##@ 数据库迁移
 

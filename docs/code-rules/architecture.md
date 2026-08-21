@@ -64,6 +64,13 @@ docs/
   design/           设计文档 —— 范围与决策的真相源
   code-rules/       本目录：怎么写
   business/         业务领域：写的是什么
+client/             uni-app 客户端（H5 + 微信小程序）。**不进分层契约** —— 它不是
+                    Python，lint-imports 管不着它；它与后端的契约靠生成的类型钉着
+  src/api/generated/  由后端 OpenAPI 生成（`make openapi`），**进 git**：CI 拿
+                      git diff --exit-code 判后端改了形状而前端没跟上
+  src/api/request.ts  唯一的请求出口：认证头、并发上限、401 续期只在这里
+  src/utils/          🔴 仅有的两个允许做数字转换的地方（decimal / series）。
+                      页面里禁止 Number( —— tests/test_client_source.py 盯着
 ```
 
 **为什么按技术职责分目录，不按业务领域分。** 这套代码的业务实体（客户、账户、

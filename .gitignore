@@ -60,3 +60,6 @@ client/dist/
 # celery beat 没带 --schedule」的情况兜底。
 celerybeat-schedule*
 celerybeat.pid
+
+# 浏览器验证工具（playwright MCP）的快照与日志落点
+.playwright-mcp/

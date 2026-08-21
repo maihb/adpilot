@@ -1,0 +1,22 @@
+{
+  "pages": [
+    {
+      "path": "pages/index/index",
+      "style": {
+        "navigationBarTitleText": "投放看板"
+      }
+    },
+    {
+      "path": "pages/redeem/redeem",
+      "style": {
+        "navigationBarTitleText": "打开我的看板"
+      }
+    }
+  ],
+  "globalStyle": {
+    "navigationBarTextStyle": "black",
+    "navigationBarTitleText": "adpilot",
+    "navigationBarBackgroundColor": "#ffffff",
+    "backgroundColor": "#f5f6f8"
+  }
+}

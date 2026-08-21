@@ -93,6 +93,8 @@
 | **接口不许漏掉认证** | `tests/test_auth_guard.py`：遍历 openapi.json，每个接口要么带 `security`、要么在一份**显式的豁免清单**里（目前四条：两个探针 + 两个换 token 的入口）。**两个方向都查** —— 清单里留着一条其实已经要认证的也红。判据取 `security` 是因为它由 FastAPI 从依赖树收集，写不了假 |
 | **客户端路由不许漏掉作用域** | 同上那个文件：`/api/portal/` 下的每个接口都必须要 `ClientBearer`，且**不许接受任何形式的 `client_id` 入参** —— 它只能来自 token。这只是第一层；第二层是 `services/` 里 `client_id` 必填关键字参数，让「查全部客户」在那条路径上根本写不出来 |
 | **签名比对不许写成 `==`** | `tests/test_auth_token.py` 最后一条**扫源码**：`verify` 里必须有 `compare_digest`，且验签必须排在解析和过期判定之前。这三件事没有可观察的行为差异，测不出来，只能盯代码形状 |
+| **前端类型不许和后端脱节** | CI 的 `frontend` job：`make openapi` 重新生成一遍再 `git diff --exit-code`。生成的 `.ts` **进 git** 正是为了让它比得出来；分仓的话这条只能靠人盯 |
+| **页面里不许把字符串转成数字** | `tests/test_client_source.py` 扫源码：后端的金额和比率下发的**永远是字符串**，而 `Number(null) === 0` —— 一个 `Number()` 就把「算不出来」显示成「还能撑 0 天」，于是每个暂停投放的账户都在客户屏幕上着火。转换只许发生在 `client/src/utils/` 里。同一个文件还盯着 `uni.request` 只走唯一出口 |
 | **示例邀请码不许写死** | `tests/test_seed.py`：seed 两次发出的码必须不同。写死一个「demo 码」等于往公开仓库里放一把人人皆知的钥匙 |
 | 数据卷不被顺手删掉 | 守卫拦下 `docker compose down -v` |
 | **push 要人明确说** | `settings.json` 里 `Bash(git push:*)` 是 deny。用户说「提交」只意味着 commit |
@@ -161,6 +163,13 @@ uv run python -m adpilot.seed
 uv run alembic upgrade head                      # 把库升到最新 schema
 uv run alembic revision --autogenerate -m "..."  # 生成迁移草稿，**必须人看一遍**
 uv run alembic check                             # 改了 model 却忘了生成迁移就报错
+
+# 客户端（uni-app）。改了后端出参形状就要重新生成类型，否则 CI 的 frontend job 会红。
+# ⚠️ 这三个 make target **没有**进 .claude/settings.json 的 allow —— 新 target 默认
+# 不授权是这个仓库的规矩，要给 agent 用就去补一条。
+make openapi         # 导出 openapi.json + 生成前端 TS 类型
+make client          # 起 H5 开发服务器（先 make dev 把后端跑起来）
+make client-check    # vue-tsc + 前端纯函数单测
 
 docker compose up -d
 

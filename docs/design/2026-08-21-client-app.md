@@ -152,40 +152,45 @@ Number(null) === 0   // ← 而 days_left: null 的意思是「无定义」
 ## 五、契约：让生成的类型真的能用
 
 [client-auth §6](2026-08-21-client-auth.md) 已经定了那道门禁的形状，并且把它挪到
-「D10 第一件事」。落地时有两个坑要先解决，否则生成出来的类型没人愿意用。
+「D10 第一件事」。真相源是 `Makefile` 的 `openapi` target 和 CI 的 frontend job。
 
 ### 导出 openapi.json 不要起服务
 
 直觉做法是起后端、`curl /openapi.json`。别这么干：那要连数据库（lifespan 会开连接
-池），而 CI 的 quality job 是不连库的；更别扭的是**生产环境那个路由是关掉的**
+池），而这道门禁的 job 不连任何外部服务；更别扭的是**生产环境那个路由是关掉的**
 （`main.py` 里 `openapi_url=None`）。
 
 正确做法是**离线调 `app.openapi()`** —— 它不走 HTTP、不触发 lifespan、不受
-`openapi_url` 影响：
+`openapi_url` 影响，因此也不需要任何依赖或凭据（`Settings` 在 dev 下允许空值，
+凭据的非空校验只在 `prod` 生效）。收口在 `make openapi` 里。
 
-```bash
-uv run python -c "import json,sys; from adpilot.main import create_app; json.dump(create_app().openapi(), sys.stdout)" > openapi.json
-```
+### ~~`Decimal` 要收口成 `string`~~ —— 不用做，它本来就是对的
 
-⚠️ `create_app()` 会读 `Settings`，而**凭据一律无默认值**（那是硬规矩第 2 条）。
-所以这一步在 CI 里要喂一组假环境变量。这不是绕过护栏 —— 假值进不了任何连接，
-它只是让配置对象构造得出来。
+> **原稿在这里判断错了**（2026-08-21，D10 落地时验出来）。留着这段而不是删掉，
+> 是因为**下一个人极可能重新犯一遍**：只要用 `Model.model_json_schema()` 去看，
+> 看到的就是 `anyOf: [number, string]`。
 
-### `Decimal` 现在生成的是 `number | string`
+原稿的说法是：Pydantic 给 `Decimal` 生成的 JSON Schema 是 `anyOf: [number, string]`，
+于是生成出来的 TS 是 `number | string`，前端每个金额都要处理一个不可能出现的分支，
+所以要加 `Money` / `Ratio` 别名把声明收成 `string`。
 
-Pydantic 给 `Decimal` 生成的 JSON Schema 是 `anyOf: [number, string]`（入参方向
-两种都收），于是 `openapi-typescript` 吐出来的是 `number | string`。**而实际下发
-的永远是 string**（§4.1 已验证）。
+**实际验下来不需要，而且做了有害。** 关键在 Pydantic 的两个 schema 模式：
 
-代价是前端每一个金额都要处理一个不可能出现的分支，几十处 —— 而人处理这种分支的
-方式通常是 `Number(x)`，正好踩回 §4.1 那个坑。
+| 模式 | 谁在用 | `Decimal` 声明成 |
+|---|---|---|
+| validation | 请求体 | `number \| string`（**两种确实都收**，还带着 `minimum` 之类的约束） |
+| serialization | 响应 | `string`（**下发的确实永远是字符串**） |
 
-**做法**：在 `schemas/` 加一个 `Money`（以及比率的 `Ratio`）类型别名，用
-`WithJsonSchema` 把对外声明收成 `string`，现有 `Decimal` 字段全换过去（集中在
-`schemas/` 的 `daily_metric` / `balance` / `portal` 三个文件）。运行时校验行为不变，
-变的只是**它对外承认自己是什么**。生成出来的 TS 就是 `string`，一个分支。
+`model_json_schema()` 默认给的是 validation 那份，而 **FastAPI 对响应用的是
+serialization 那份** —— 所以生成出来的 `spend: string`、`days_left: string | null`
+从一开始就是对的、也是准确的。
 
-这件事必须在写页面之前做完，不然改的时候要回头动每一个页面。
+加别名反而会把入参方向也压成 `string`，那既失真（后端真的两种都收），又会吃掉
+`WithJsonSchema` 覆盖不了的 `Field(ge=0)` 约束 —— OpenAPI 上就看不到「余额不能
+为负」了。
+
+**§4.1 那个坑不受影响，反而更明确**：类型既然是 `string | null`，`Number()` 的
+危险就是确定的，不是可能的。
 
 ---
 
@@ -267,7 +272,7 @@ client/src/
 
 ## 九、CI：新增一个 frontend job
 
-现有三个 job（quality / integration / docker）都不装 Node。新增第四个，它跑三件事：
+现有三个 job（quality / integration / docker）都不装 Node。新增第四个 `frontend`，它跑三件事：
 
 | 步骤 | 拦的是什么 |
 |---|---|
@@ -280,9 +285,22 @@ client/src/
 条件 —— **错了不会报错，只会安静地显示成另一个意思**。页面渲染不测，那是 E2E 的
 活，而 E2E 已经明确不做。
 
-再加一条 ESLint 规则：`utils/decimal.ts` 之外禁止出现 `Number(` / `parseFloat(`
-（`no-restricted-syntax`）。§4.1 那个坑是这个客户端里唯一一个「一个字符就能把
-『不知道』变成『着火』」的地方，值得为它单开一条规则。
+### 那条「禁止 `Number(`」的规则，写成 pytest 而不是 ESLint
+
+原稿说加一条 `no-restricted-syntax`。落地时换成了扫源码的 pytest
+（`tests/test_client_source.py`），两个理由：
+
+- 规则本身只要**一条正则**，而为它引一整套 JS lint 工具链（eslint + vue 解析器
+  + ts 解析器）要装的东西比被测的规则重得多；
+- 放在 pytest 里它**跟着已有的五道门禁一起跑**，不必等 frontend job 装完 Node。
+
+这和 `test_auth_token.py` 最后那条扫 `verify` 源码是同一个套路：**没有可观察行为
+差异的事，只能盯代码形状**。同一个文件里顺带盯了另外两件：`uni.request` 只许出现
+在唯一出口 `api/request.ts` 里，以及生成的类型确实进了 git（不进的话上面那道
+`git diff --exit-code` 无从比起）。
+
+⚠️ 这类门禁有个共同的失效模式：**路径写错就变成恒绿**。所以那个文件里第一条测试
+先验「扫描目标真的在、且真的扫到了文件」。
 
 **代价老实写下来**：CI 多一个装 Node 的 job，PR 反馈慢一点；`client/` 下会多出
 `package-lock.json` 与一份生成的 `.ts`（后者进 git 是**故意的** —— 不进的话
@@ -329,11 +347,12 @@ docker compose up -d → migrate → seed（打印一个随机邀请码）
 
 | 天 | 产出 | 验收标准 |
 |---|---|---|
-| **D10** | 契约先行 + 骨架 + 能登录 | ① `Money`/`Ratio` 收口完成，生成的 TS 里金额是 `string`；② frontend job 在 CI 里绿；③ H5 上粘贴 seed 打印的邀请码能进到首页并看到账户名 |
+| **D10** | 契约先行 + 骨架 + 能登录 | ① 生成的类型进 git，`git diff --exit-code` 那道门禁在 CI 里绿；② 客户端源码门禁（禁 `Number(`、`uni.request` 唯一出口）跟着 pytest 跑；③ H5 上粘贴 seed 打印的邀请码能进到首页并看到账户名 |
 | **D11** | 四屏做完 + 小程序端跑通 | ① 四个页面都有真实数据；② §4 那四个坑各有一处可演示的正确表现（暂停投放的账户不显示「0 天」、缺数据的那天断开）；③ 微信开发者工具里能走完扫码到看板 |
 
-**D10 的验收标准里没有一个页面**，是刻意的：那天的产出是契约和通路。页面在通路
-不通的时候写出来，每一个都要回头改。
+**D10 只做两个页面**（扫码页和首页），因为验收标准③恰好需要它们 —— 那一天的产出
+是契约和通路，页面只是用来证明通路真的通了。剩下三屏放 D11：在通路不通的时候把
+页面写出来，每一个都要回头改。
 
 ---
 
