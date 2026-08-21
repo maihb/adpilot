@@ -24,6 +24,7 @@
 | **认证、授权作用域、两个前端怎么摆**（D9 起） | [`docs/design/2026-08-21-client-auth.md`](docs/design/2026-08-21-client-auth.md) |
 | **客户端有哪几屏、显示层那四个坑**（D10–D11） | [`docs/design/2026-08-21-client-app.md`](docs/design/2026-08-21-client-app.md) |
 | **内部后台怎么摆、写操作分几级**（D12） | [`docs/design/2026-08-21-admin-console.md`](docs/design/2026-08-21-admin-console.md) |
+| **日报、LLM 边界、成本与提示词版本**（D13–D14） | [`docs/design/2026-08-21-llm-reports.md`](docs/design/2026-08-21-llm-reports.md) |
 | **加一个要认证的接口 / 客户端接口** | [`docs/business/auth.md`](docs/business/auth.md) + [`docs/business/portal.md`](docs/business/portal.md) |
 | **改客户端界面 / 加一屏**（四条显示口径规则） | [`docs/business/client-app.md`](docs/business/client-app.md) |
 | **改内部后台 / 加一屏**（写操作分三级） | [`docs/business/admin.md`](docs/business/admin.md) |
