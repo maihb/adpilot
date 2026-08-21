@@ -130,8 +130,8 @@ type = "layers"
 # 模块清单去比对「有没有漏列的」。
 containers = ["adpilot"]
 # exhaustive：adpilot 下新增的顶层模块必须在这张表里有位置，否则契约本身就红。
-# 这条是刻意的 —— rules / llm 都还没建，建的那天要先想清楚它们摆在哪一层，
-# 而不是等依赖绕成一团之后再来考古。
+# 这条是刻意的 —— rules 和 llm 建立之前都先在这张表里占了位，那一步逼着人回答
+# 「它摆在哪一层」，而不是等依赖绕成一团之后再来考古。
 exhaustive = true
 layers = [
     # seed 和 main 都是「组装 + 入口」：一个把 api 装成应用，一个把示例数据灌进库。
@@ -152,10 +152,18 @@ layers = [
     "schemas",
     "models",
     # providers 只认外部格式、db 只管连接（含 RabbitMQ 的接线）、notifiers 只管把
-    # 消息送出去，三者各自独立正是 architecture.md 那张图想表达的。providers 是
+    # 消息送出去，四者各自独立正是 architecture.md 那张图想表达的。providers 是
     # 入站、notifiers 是出站，摆在同一层是因为它们都只跟外部系统打交道、都不认识
     # 业务。
-    "providers | db | notifiers",
+    #
+    # 🔴 llm 压在这一层，是设计文档「LLM 只解释不决策」那条硬边界的**机器形态**：
+    # 它够不着 models / schemas / services / db，所以在 llm/ 里写一句 select(...)、
+    # 把日报存进库、或者调一个业务函数去改点什么，全都会被这份契约当场拦下 ——
+    # 那一层唯一能做的事是「结构化输入进去、结构化输出出来」。要改任何东西，只能
+    # 由 services/ 拿着那个输出去做，而那一步是确定性代码、人能 review。
+    # 代价是 llm/ 得自己定义输入输出的 Pydantic 契约（llm/contracts.py），够不着
+    # schemas/ —— 那是好事：LLM 层的契约和对外 API 的契约本来就该分开演进。
+    "providers | db | notifiers | llm",
     # rules 压在这么低的位置是**故意的**：它够不着 models、schemas、db，所以想在
     # 规则里写一句 select(...) 会被这份契约当场拦下。architecture.md 把 rules 和
     # services 画在同一行说的是「都是业务逻辑」，依赖方向上则是 services 调 rules、

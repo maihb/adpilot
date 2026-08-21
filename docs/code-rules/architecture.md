@@ -3,11 +3,12 @@
 技术选型的来龙去脉在[设计文档第四节](../design/2026-08-19-mvp-design.md)，这里只讲
 **代码怎么摆、依赖往哪个方向走**。
 
-> **进度**：D1–D9 完成 —— 骨架、四个客户端、`models/` + Alembic 迁移、`schemas/`、
+> **进度**：D1–D13 完成 —— 骨架、四个客户端、`models/` + Alembic 迁移、`schemas/`、
 > `services/`、`providers/`、`tasks/`（含每小时的告警巡检）、`rules/`（余额可撑
-> 天数、指标周同比异动）、`notifiers/` 和 `auth/`（自签 HMAC token + 授权作用域）
-> 都已落地，另有 `seed.py` 提供脱敏示例数据。只剩 `llm/` 还标着 🚧 —— 先把位置
-> 定下来，是为了三个人（或三个 agent）各写各的时候不会摆出三套结构。
+> 天数、指标周同比异动）、`notifiers/`、`auth/`（自签 HMAC token + 授权作用域）
+> 和 `llm/`（适配器、输出契约、提示词版本、成本记录）都已落地，另有 `seed.py`
+> 提供脱敏示例数据、两个前端（`client/` 与 `admin/`）。**下一段是 D14 的日报**，
+> 它是编排，不新增分层。
 
 ---
 
@@ -53,7 +54,14 @@ src/adpilot/
     anomaly.py      指标周同比异动（库存断货还没做）
   notifiers/        出站通知：只管送出去，不决定要不要送
     webhook.py      通用 webhook；🔴 URL 本身是凭据
-  llm/          🚧  LLM 适配器与提示词，输出必须过 Pydantic 校验
+  llm/              LLM 适配器与提示词。**够不着 models/schemas/services/db，契约保证**
+                    —— 那是「只解释不决策」的机器形态，边界写在它的 __init__ docstring 里
+    base.py         供应商协议与一次调用的产物；**不 import 任何内部模块**
+    contracts.py    输入输出的 Pydantic 契约。🔴 输出侧**一个数字字段都没有**
+    prompts.py      提示词常量，每份带版本号；改正文必须升版本（有门禁）
+    structured.py   调用 → 解析 → 校验失败重试；记账明细在返回值里（这层写不了库）
+    openai_compat.py  唯一的真实供应商，任何 OpenAI 兼容端点
+    fake.py         测试与本地跑通用的假供应商 —— **CI 里一次真实调用都不发**
 tests/
   conftest.py       夹具：offline_*（不连外部服务）与 live_*（连真实服务）
   test_*.py         单元测试；需要真实服务的挂 @pytest.mark.integration
@@ -123,8 +131,13 @@ main  ‖  seed             ← 组装：main 把 api 装成应用，seed 把示
    式的参数化测试覆盖完，而不必起数据库。所以它在图上被压到了很低的位置 ——
    低到够不着 `models` / `schemas` / `db`，写一句 `select(...)` 会被契约当场拦下。
    「规则和业务逻辑是一层」说的是职责，依赖方向上是 `services` 调 `rules`。
-4. **`llm/` 不做决策。** 只把结构化输入变成结构化输出，边界见
-   [设计文档第五节](../design/2026-08-19-mvp-design.md)。
+4. **`llm/` 不做决策。** 只把结构化输入变成结构化输出。它被压到 `providers | db`
+   这一层，于是**够不着 `models` / `schemas` / `services` / `db`** —— 在 `llm/` 里
+   写一句 `select(...)`、把日报存进库、或者调一个业务函数去改点什么，全都会被契约
+   当场拦下。这不是洁癖，是[设计文档第五节](../design/2026-08-19-mvp-design.md)
+   「LLM 只解释不决策、不碰钱」那两条硬边界的机器形态：提示词可以被绕过，而且绕过
+   时没有任何东西会报错。代价是它得自己定义输入输出契约（`llm/contracts.py`），
+   够不着 `schemas/` —— 那是好事，两套契约本来就该分开演进。
 5. **`api/` 与 `tasks/` 互不 import。** `tasks/` 认识 `api/` 意味着 worker 里出现
    了请求对象；`api/` 认识 `tasks/` 意味着 Web 进程要把 worker 那一侧的初始化代码
    （事件循环、连接池管理）也 import 进来。接口投递任务走 `Celery.send_task`
@@ -135,8 +148,9 @@ main  ‖  seed             ← 组装：main 把 api 装成应用，seed 把示
 > **层的顺序就是上面这张图** —— 改了图就要去改那份配置，反过来也一样。
 >
 > 契约开着 `exhaustive`：`adpilot` 下新增一个顶层模块必须先在分层表里占个位置，
-> 否则契约本身就红。这是刻意的 —— `rules/` `llm/` 都还没建，建之前先想清楚它摆在
-> 哪一层，比建完之后再来考古依赖便宜得多。
+> 否则契约本身就红。这是刻意的 —— `rules/` 和 `llm/` 都是**先在表里占位、再建
+> 目录**（建目录那一刻契约会先红一次，那正是它在逼人回答「它摆在哪一层」），
+> 比建完之后再来考古依赖便宜得多。
 
 ---
 
@@ -161,8 +175,8 @@ celery -A adpilot.tasks.app worker
 ▸   → 从 adpilot 队列取消息 → 任务体解参数、开事务
 ▸     → services.normalize：快照 → PG daily_metrics（可拿快照重跑）
 ▸     → 失败：瞬时故障退避重试；数据不对 → reject 进 adpilot.dead 死信队列
-      → rules 巡检 → 告警          （D7–D8）
-      → llm 撰写日报 → PG reports  （D12–D13）
+▸     → rules 巡检 → 告警          （D7–D8，已进 beat_schedule）
+      → llm 撰写日报 → PG reports  （D14；llm/ 与操作记录已就位）
   → worker_process_shutdown：关连接池、关事件循环
 ```
 
@@ -184,11 +198,15 @@ result backend 由接口去查（`GET /api/tasks/{id}`）。worker **不回调**
   `offline_*` 夹具正是靠这个把「所有依赖都连不上」造出来的。
 - **构造客户端不等于连上去。** 四个驱动都是懒连接，这是故意的：某个依赖短暂挂掉
   时进程仍要能起来，「连不上」该由就绪探针报出来，而不是由启动过程报出来。
-- **加一个新的外部系统**（如 LLM 供应商）= 在 `db/` 或对应目录写
+- **加一个新的连接池型外部系统** = 在 `db/` 或对应目录写
   `create_client(settings)`，在 `Resources` 加一个字段，在 `open_resources` 里
   建与关，在就绪探针里加一条探测，**再去 `conftest.py` 的 `offline_settings`
   补上它的 host / port**。五处，缺一处就会漏关、漏报，或者让「哪儿都连不上」那个
   夹具悄悄连上开发机上真跑着的服务。
+- ⚠️ **不是每个外部系统都该进 `Resources`。** LLM 供应商和 webhook 都没有进：
+  它们一天调几次，每次新建一个 `AsyncClient` 的开销可以忽略，而进去就意味着就绪
+  探针要去探它 —— 对 LLM 那是**一次真花钱的请求**，还会让「服务健不健康」取决于
+  第三方。判据是**有没有连接池要管**，不是「是不是外部系统」。
 - **worker 进程不走 `app.state`**，它有自己一套（`tasks/runtime.py`）：连接池必须
   在 fork **之后**建、事件循环必须复用同一个。两个坑都不会当场报错，只会在压力上来
   之后变成偶发故障 —— 那个模块的 docstring 是这件事的真相源。
@@ -220,6 +238,7 @@ result backend 由接口去查（`GET /api/tasks/{id}`）。worker **不回调**
 | 一个后台任务 | `tasks/<domain>.py` | `tasks/normalize.py`；任务体只做编排，逻辑仍在 `services/`。**别忘了在 `tasks/app.py` 的 `TASK_MODULES` 里加一行**，否则 worker 认不出这个任务（有门禁盯着） |
 | 一个定时任务 | 同上 + `db/broker.py` 的 `beat_schedule` | 排期要显式指定 `queue`，否则消息进默认队列没人取。跑起来还要有一个 beat 进程 |
 | 一个通知通道 | `notifiers/<channel>.py` | `notifiers/webhook.py`；只管送出去，失败返回 `False` 不抛 |
+| 一次 **LLM 调用** | `llm/prompts.py` 加提示词 + `llm/contracts.py` 加契约，调用走 `services/llm.py` 的 `run` | 🔴 **别直接 import `llm.structured`** —— 绕过 `services/llm.py` 就等于绕过记账和每日闸门。输出契约里**不许有数字字段** |
 | 一个**内部**接口 | 同「一个接口」，另外去 `main.py` 那个循环里加一行 | 认证统一在那里挂，漏了会被 `tests/test_auth_guard.py` 拦下 |
 | 一个**客户端**接口 | `api/portal.py` + `schemas/portal.py` | 必须声明 `ClientScopeDep`，服务函数的 `client_id` 必须是**必填关键字参数**。两道门禁见 [`business/portal.md`](../business/portal.md) |
 

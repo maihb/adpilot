@@ -41,6 +41,15 @@ x-app-env: &app-env
   AUTH_SECRET: ${AUTH_SECRET:-}
   OPERATOR_USERNAME: ${OPERATOR_USERNAME:-admin}
   OPERATOR_PASSWORD_HASH: ${OPERATOR_PASSWORD_HASH:-}
+  # LLM。全部 `:-`：**没配 LLM 是正常状态**，日报照样生成，只是那一行人话空着
+  # 并标注「未生成」。API key 同理 —— 本地 Ollama / vLLM 不校验它。
+  LLM_BASE_URL: ${LLM_BASE_URL:-}
+  LLM_MODEL: ${LLM_MODEL:-}
+  LLM_API_KEY: ${LLM_API_KEY:-}
+  LLM_DAILY_CALL_LIMIT: ${LLM_DAILY_CALL_LIMIT:-200}
+  # 留空 = 不估成本，llm_calls.estimated_cost 记 NULL（「不知道」不是「免费」）。
+  LLM_INPUT_COST_PER_MTOK: ${LLM_INPUT_COST_PER_MTOK:-0}
+  LLM_OUTPUT_COST_PER_MTOK: ${LLM_OUTPUT_COST_PER_MTOK:-0}
 
 x-backends: &backends
   postgres:

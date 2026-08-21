@@ -40,3 +40,21 @@ class InvalidDataError(DomainError):
     message 直接来自 `providers`，**必须带得上定位信息**（第几行、哪个字段、
     期望什么）。导入的人拿着一份几千行的文件，只说「解析失败」等于没说。
     """
+
+
+class NotConfiguredError(DomainError):
+    """服务端缺了这件事必需的配置 → 503。
+
+    **是部署方的问题，不是调用方的问题**，所以不能回 4xx —— 那会让人对着一个
+    永远失败的按钮反复试。message 可以直说缺哪个环境变量：那些名字在
+    `.env.example` 里本来就写着，不是秘密（同 `api/errors.py` 里 AUTH_SECRET
+    那条的处置）。
+    """
+
+
+class QuotaExceededError(DomainError):
+    """撞上了自己设的用量上限 → 429。
+
+    与「供应商限流」不是一回事：这是**本地闸门**，为的是防一个写错的循环在夜里
+    把额度跑光。自托管意味着花的是使用者自己的钱，没有人替他兜底。
+    """

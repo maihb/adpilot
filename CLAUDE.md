@@ -33,6 +33,7 @@
 | **加一个接口**（含可照抄的四步与踩坑速查） | [`docs/code-rules/api.md`](docs/code-rules/api.md) |
 | 分支 / 提交信息 / **推送前自检** / 需明确指令的操作 | [`docs/code-rules/git-workflow.md`](docs/code-rules/git-workflow.md) |
 | **登记投放操作 / 日报「本期做了什么」的来源** | [`docs/business/actions.md`](docs/business/actions.md) |
+| **调 LLM / 加提示词 / 查调用成本**（三条硬边界各被什么拦着） | [`docs/business/llm.md`](docs/business/llm.md) |
 | **加一个后台任务**（重试与死信怎么分流、worker 里的两个致命坑） | [`docs/business/tasks.md`](docs/business/tasks.md) |
 | **加一条规则或告警**（状态机怎么去重、通知怎么不重复打扰） | [`docs/business/alerts.md`](docs/business/alerts.md) |
 | **指标口径、时区、数据回填、告警公式** | [`docs/business/glossary.md`](docs/business/glossary.md) |
@@ -102,6 +103,9 @@
 | **前端 lock 不许和 package.json 漂移** | `make client-check` 头两条跑 `npm ci --dry-run`。**本地习惯 `npm install`、CI 跑 `npm ci`**，而前者容忍「lock 里的版本和重新解析的结果不一致」、后者直接拒绝 —— 不在本地验，这个差异只会在推出去之后才暴露 |
 | **前端类型不许和后端脱节** | CI 的 `frontend` job：`make openapi` 重新生成一遍再 `git diff --exit-code`。生成的 `.ts` **进 git** 正是为了让它比得出来；分仓的话这条只能靠人盯 |
 | **页面里不许把字符串转成数字** | `tests/test_frontend_source.py` 扫源码：后端的金额和比率下发的**永远是字符串**，而 `Number(null) === 0` —— 一个 `Number()` 就把「算不出来」显示成「还能撑 0 天」，于是每个暂停投放的账户都在客户屏幕上着火。转换只许发生在两个前端各自的 `src/utils/` 里。同一个文件还盯着网络调用只走唯一出口（客户端 `uni.request`、后台 `fetch`）、模板里不许写 markdown 的 `**`、以及告警类型的中文名和后端 `AlertKind` 双向对齐 |
+| **LLM 输出里不许有数字字段** | `tests/test_llm.py`：扫 `llm/contracts.py` 的输出模型，字段类型只能是 `str` / `list[str]`。日报里的数字全部由代码从 `daily_metrics` 算，加一个 `cpa: Decimal` 进去，「模型把 CPA 编成另一个值」就从**结构上不可能**退化成「但愿它别」，而那天不会有任何东西报错。⚠️ 它**拦不住模型在散文里编一个百分比** —— 那道防线是人工修订 |
+| **提示词改了必须升版本号** | 同上那个文件：对提示词正文算指纹再比对。提示词改一次日报口径就变一次，没有版本号，三个月后没法把「这份日报」和「当时那版口径」对上。被它拦到时**先加版本号**，别直接更新指纹 |
+| **LLM 层够不着数据库** | `lint-imports`：`llm` 压在 `models`/`schemas`/`services`/`db` **之下**，在那一层写 `select(...)`、存日报、调业务函数全都过不了契约。这是「LLM 只解释不决策」的机器形态 —— 提示词可以被绕过，且绕过时不会报错 |
 | **示例邀请码不许写死** | `tests/test_seed.py`：seed 两次发出的码必须不同。写死一个「demo 码」等于往公开仓库里放一把人人皆知的钥匙 |
 | 数据卷不被顺手删掉 | 守卫拦下 `docker compose down -v` |
 | **push 要人明确说** | `settings.json` 里 `Bash(git push:*)` 是 deny。用户说「提交」只意味着 commit |

@@ -12,13 +12,14 @@
 
 ## 领域
 
-> **D9 的验收标准已达成**：拿别人的 token 查不到我的数据，且这件事有测试盯着。
-> 整条链现在是 客户与账户 → 文件导入 → Mongo 原始快照 →（RabbitMQ）→ 归一化
-> upsert → 按天查询 →（每小时 beat）→ 规则巡检 → 告警状态机 → webhook，外面套着
-> 一层认证：内部接口全要运营身份，客户扫邀请码换一张 7 天的票只能看自己那份
-> （`/api/portal/*`）。**下一段是 D10–D11** 的 uni-app 客户端 —— 它要的后端接口
-> 已经在 [portal](portal.md) 里了；库存断货那条规则还欠着（它需要一个全新的数据
-> 域）。下表是
+> **D13 完成**：日报的两块前置就位了 —— [操作记录](actions.md)（「本期做了什么」
+> 的唯一数据来源，`reason` 必填）和 [LLM 层](llm.md)（输出契约里没有数字字段，
+> 调用成本与每日闸门都在）。整条链现在是 客户与账户 → 文件导入 → Mongo 原始快照
+> →（RabbitMQ）→ 归一化 upsert → 按天查询 →（每小时 beat）→ 规则巡检 → 告警状态机
+> → webhook，外面套着一层认证（内部接口全要运营身份，客户扫邀请码换一张 7 天的票
+> 只能看自己那份），前面摆着两个前端。**下一段是 D14** 的日报 —— draft → 人工修订
+> → published，客户端只看得到已发布的那份；库存断货那条规则仍然欠着（它需要一个
+> 全新的数据域）。下表是
 > [设计文档第六、七节](../design/2026-08-19-mvp-design.md)定下的范围，落一个
 > 勾一个。**「状态」这一列不许提前打勾** —— 一张说自己有东西但其实没有的表，
 > 比没有这张表更糟。
@@ -41,8 +42,8 @@
 | [余额与账户](balances.md) | `balances` | 余额快照录入、可撑天数 | `rules/balance.py` `services/balance.py` | ✅ D7 |
 | [告警与巡检](alerts.md) | `alerts` | 状态机去重、定时巡检、指标异动、webhook 推送 | `rules/anomaly.py` `services/alert.py` `tasks/alerts.py` `notifiers/` | ✅ D8：巡检自动跑、同一件事只报一次；库存断货未做 |
 | [操作记录](actions.md) | `actions` | 「本期做了什么」的唯一数据来源，**`reason` 必填** —— 平台变更日志补得上「改了什么」，补不上「为什么」 | `models/action.py` `services/action.py` `api/action.py` | ✅ D13：登记与查询已通；自动抓平台变更日志未做，[发布前校验非空](../design/2026-08-19-mvp-design.md#4-投放操作记录mvp-手动登记必填)随日报走 |
-| 日报 | — | 生成、人工修订、发布、**快照固定** | `services/reports.py`（🚧） | 🚧 D12–D13 |
-| LLM | — | 日报撰写、异常诊断、调用成本记录 | `llm/`（🚧） | 🚧 D12–D13 |
+| 日报 | — | 生成、人工修订、发布、**快照固定** | `services/report.py`（🚧） | 🚧 D14：前置的[操作记录](actions.md)与 [LLM 层](llm.md)已就位 |
+| [LLM](llm.md) | — | 适配器、输出契约（**没有数字字段**）、提示词版本、调用成本与每日闸门 | `llm/` `services/llm.py` `models/llm_call.py` | ✅ D13：假 provider 下走通「结构化输入 → 校验 → 落 `llm_calls`」；日报与诊断本身是 D14 |
 | 健康检查 | `health` | 存活与就绪探针 | `api/health.py` | ✅ 已落地 |
 
 ---

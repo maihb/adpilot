@@ -19,6 +19,7 @@
 
 from __future__ import annotations
 
+from decimal import Decimal
 from enum import StrEnum
 from functools import lru_cache
 from urllib.parse import quote
@@ -128,6 +129,48 @@ class Settings(BaseSettings):
     # 🔴 存**哈希**不存明文。`.env` 一旦被谁贴进聊天窗口，明文就是直接可用的凭据。
     # 生成方式：`uv run python -m adpilot.auth.password`。
     operator_password_hash: SecretStr = Field(default=SecretStr(""))
+
+    # --- LLM：任何讲 OpenAI 协议的服务（D13 起）---------------------------
+    #
+    # 不绑定任何一家：DeepSeek、Kimi、通义、Claude 与 Gemini 的兼容端点、本地
+    # Ollama / vLLM 全都接得上，换供应商改这三个值就行（设计文档第十节第 2 条）。
+    #
+    # 三项都空着是**正常状态**：没配 LLM，日报照样出得来，只是那一行人话空着并
+    # 标注「未生成」——数字部分是确定性的，不该被模型的可用性绑架。
+    llm_base_url: str = ""
+    llm_model: str = ""
+    # 🔴 是凭据，所以是 SecretStr。**但空着不算「凭据留了默认值」**：本地跑的
+    # Ollama / vLLM 根本不校验它，强制必填会把最容易上手的那条路堵死。判断「配没
+    # 配 LLM」看的是 base_url 和 model（见 `llm_is_configured`），不看这一项。
+    llm_api_key: SecretStr = Field(default=SecretStr(""))
+
+    # 每天最多调几次。**不是省钱，是防失控**：一个写错的循环能在夜里把额度跑光，
+    # 而自托管意味着花的是使用者自己的钱、没有人替他兜底。默认给得宽松 —— 日报
+    # 一天一个账户一次，诊断是人点一下才有。
+    llm_daily_call_limit: int = 200
+
+    # 每百万 token 的价格，用来估成本。**默认 0 表示「没配单价」**，此时
+    # `llm_calls.estimated_cost` 记 NULL 而不是 0 —— 0 的意思是「免费」，而实情
+    # 是「不知道多少钱」，混起来会让月度成本统计凭空少一截。
+    #
+    # 币种由使用者自己心里有数：这里不记币种，因为它只跟一家供应商的账单对得上，
+    # 而对账时人本来就知道自己用的是谁。金额一律 Decimal（conventions.md）。
+    llm_input_cost_per_mtok: Decimal = Decimal("0")
+    llm_output_cost_per_mtok: Decimal = Decimal("0")
+
+    @property
+    def llm_is_configured(self) -> bool:
+        """调得出模型没有。判断收口在这里，调用方不去比对空字符串。
+
+        **不看 `llm_api_key`**：本地推理服务不需要它，而把它算进判据会让「用
+        Ollama 跑通全链」变成一件要先编个假 key 的事。
+        """
+        return bool(self.llm_base_url and self.llm_model)
+
+    @property
+    def llm_prices_are_configured(self) -> bool:
+        """填了单价没有。没填就不估成本，记 NULL（见上面那两项）。"""
+        return bool(self.llm_input_cost_per_mtok or self.llm_output_cost_per_mtok)
 
     @property
     def alerts_are_pushed(self) -> bool:

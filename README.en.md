@@ -13,10 +13,13 @@ server.
 
 [中文（主）](README.md) · [Design doc (zh)](docs/design/2026-08-19-mvp-design.md)
 
-> **Status: early. Milestone D1–D2 of 14.** The stack boots, health checks pass
-> and CI is green. Report ingestion, the client app and the LLM layer are not
-> built yet. The [roadmap](#roadmap) marks what is real and what is not — this
-> README will never claim a feature that does not exist.
+> **Status: milestone D1–D13 of 14.** The whole chain works: import a CSV → raw
+> snapshot → normalised daily metrics → rule sweep → alert push, wrapped in
+> authentication, with a client app and an admin console in front. The LLM layer
+> and the action log are in too. **The daily report itself (D14) is not built
+> yet** — that is the most valuable output of this system, so do not assume it
+> can write one before that lands. The [roadmap](#roadmap) marks what is real
+> and what is not — this README will never claim a feature that does not exist.
 
 ## Why this exists
 
@@ -247,7 +250,7 @@ that is merely recommended rots; if it matters here, it fails the build.
 | Cache / limits | Redis 7 | Token buckets shared across workers, hot aggregate cache |
 | Client | uni-app 3 + Vue 3 + TS | One codebase → WeChat Mini Program, H5 and App. Clients scan a code and look; no install, no account |
 | Console | Vue 3 + Element Plus | Internal operator UI, density first |
-| LLM | Any OpenAI-compatible endpoint | Not bound to a vendor — DeepSeek, Kimi, Qwen, local Ollama or vLLM all work. Claude and Gemini adapters ship as examples |
+| LLM | Any OpenAI-compatible endpoint | Not bound to a vendor — DeepSeek, Kimi, Qwen, local Ollama or vLLM all work. Claude and Gemini go through their own compatible endpoints, so **no native adapters**: those would only buy their vendor-specific features, and writing a report needs none of them |
 
 ## Roadmap
 
@@ -259,7 +262,8 @@ that is merely recommended rots; if it matters here, it fails the build.
 | D9 | Authentication, authorisation scope, invite codes | Someone else's token cannot reach my data, and a test says so | ✅ |
 | D10–D11 | uni-app client | H5 running; Mini Program compiles, runtime needs your own DevTools | ✅ |
 | D12 | Vue 3 admin console | Client management, imports and invite codes usable from the UI | ✅ |
-| D13–D14 | LLM reports and diagnosis | Report carries the one line of plain English that matters | ⬜ |
+| D13 | LLM layer, call cost, action log | With a fake provider: structured input → validation → a row in `llm_calls`; actions can be recorded and queried | ✅ |
+| D14 | Report drafting / revision / publishing, anomaly diagnosis | Report carries the one line of plain English that matters, and an unrevised one cannot be published | ⬜ |
 | D15 | Docs, screenshots, deploy | A stranger can run it within five minutes | ⬜ |
 
 **Deliberately out of scope for v1:** no live Ads API (the adapter interface is

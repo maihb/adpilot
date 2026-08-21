@@ -22,7 +22,9 @@ from adpilot.services.exceptions import (
     ConflictError,
     DomainError,
     InvalidDataError,
+    NotConfiguredError,
     NotFoundError,
+    QuotaExceededError,
     ReferenceNotFoundError,
 )
 
@@ -41,6 +43,8 @@ _STATUS_BY_EXCEPTION: Final[dict[type[DomainError], int]] = {
     ConflictError: status.HTTP_409_CONFLICT,
     ReferenceNotFoundError: status.HTTP_422_UNPROCESSABLE_CONTENT,
     InvalidDataError: status.HTTP_422_UNPROCESSABLE_CONTENT,
+    QuotaExceededError: status.HTTP_429_TOO_MANY_REQUESTS,
+    NotConfiguredError: status.HTTP_503_SERVICE_UNAVAILABLE,
 }
 
 
@@ -110,6 +114,7 @@ def responses(*codes: int) -> dict[int | str, dict[str, Any]]:
         status.HTTP_409_CONFLICT: "与已有数据冲突",
         status.HTTP_413_CONTENT_TOO_LARGE: "上传的文件超过大小上限",
         status.HTTP_422_UNPROCESSABLE_CONTENT: "入参不合法，或引用了不存在的对象",
-        status.HTTP_503_SERVICE_UNAVAILABLE: "服务端未配置认证",
+        status.HTTP_429_TOO_MANY_REQUESTS: "超过了本地设置的用量上限",
+        status.HTTP_503_SERVICE_UNAVAILABLE: "服务端缺少必要配置（认证、LLM 等）",
     }
     return {code: {"model": ErrorResponse, "description": described[code]} for code in codes}
