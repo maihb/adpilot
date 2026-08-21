@@ -7,12 +7,50 @@
       }
     },
     {
+      "path": "pages/alerts/alerts",
+      "style": {
+        "navigationBarTitleText": "要注意的事"
+      }
+    },
+    {
+      "path": "pages/about/about",
+      "style": {
+        "navigationBarTitleText": "关于这份数据"
+      }
+    },
+    {
+      "path": "pages/account/account",
+      "style": {
+        "navigationBarTitleText": "账户明细"
+      }
+    },
+    {
       "path": "pages/redeem/redeem",
       "style": {
         "navigationBarTitleText": "打开我的看板"
       }
     }
   ],
+  "tabBar": {
+    "color": "#9ca3af",
+    "selectedColor": "#1f6feb",
+    "backgroundColor": "#ffffff",
+    "borderStyle": "black",
+    "list": [
+      {
+        "pagePath": "pages/index/index",
+        "text": "看板"
+      },
+      {
+        "pagePath": "pages/alerts/alerts",
+        "text": "告警"
+      },
+      {
+        "pagePath": "pages/about/about",
+        "text": "我的"
+      }
+    ]
+  },
   "globalStyle": {
     "navigationBarTextStyle": "black",
     "navigationBarTitleText": "adpilot",

@@ -270,22 +270,34 @@ def test_seed_refuses_production(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.integration
-async def test_the_demo_invite_code_is_random_and_actually_works(
+async def test_the_demo_invite_codes_are_random_and_actually_work(
     live_session: AsyncSession,
 ) -> None:
-    """seed 发出来的邀请码必须是**随机的**，且真的能换到那个客户。
+    """seed 发出来的邀请码必须是**随机的**，且每个都真的能换到对应那个客户。
 
     写死一个「demo 码」等于往公开仓库里放一把人人皆知的钥匙 —— 哪怕它只对示例
     数据有效，也会有人把 seed 跑在一个已经有真实客户的库上。两次调用拿到同一个
     码，就是那件事发生了。
+
+    **每个客户都要有码**：四个示例账户各演示一种规则结局，而客户端一张票只能看
+    一个客户。少发一个，那个客户想演示的边界在界面上就永远看不到。
     """
     await seed.seed(live_session)
 
-    name, first = await seed.issue_demo_invite(live_session)
-    _, second = await seed.issue_demo_invite(live_session)
+    first = await seed.issue_demo_invites(live_session)
+    second = await seed.issue_demo_invites(live_session)
 
-    assert first != second, "两次发出同一个码，说明它被写死在源码里了"
-    assert len(first) >= 32, "码太短，熵不够 —— 这是个不需要认证就能试的入口"
+    assert len(first) == len(seed._PLAN), "有客户没拿到码"
+    assert len(first) == len(second)
 
-    redeemed = await invite_service.redeem(live_session, first)
-    assert redeemed.name == name
+    codes = [code for _, code in first]
+    assert len(set(codes)) == len(codes), "同一批里发出了重复的码"
+    assert all(len(code) >= 32 for code in codes), "码太短，熵不够 —— 这是个不需要认证就能试的入口"
+
+    for (_, before), (_, after) in zip(first, second, strict=True):
+        assert before != after, "两次发出同一个码，说明它被写死在源码里了"
+
+    # 每个码都得换到**它自己那个**客户 —— 串了的话，客户端会把 A 的花费给 B 看。
+    for name, code in first:
+        redeemed = await invite_service.redeem(live_session, code)
+        assert redeemed.name == name

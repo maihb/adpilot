@@ -24,6 +24,7 @@
 | **认证、授权作用域、两个前端怎么摆**（D9 起） | [`docs/design/2026-08-21-client-auth.md`](docs/design/2026-08-21-client-auth.md) |
 | **客户端有哪几屏、显示层那四个坑**（D10–D11） | [`docs/design/2026-08-21-client-app.md`](docs/design/2026-08-21-client-app.md) |
 | **加一个要认证的接口 / 客户端接口** | [`docs/business/auth.md`](docs/business/auth.md) + [`docs/business/portal.md`](docs/business/portal.md) |
+| **改客户端界面 / 加一屏**（四条显示口径规则） | [`docs/business/client-app.md`](docs/business/client-app.md) |
 | **代码摆在哪、依赖往哪个方向走** | [`docs/code-rules/architecture.md`](docs/code-rules/architecture.md) |
 | 金额 / 时区 / 类型 / 异步 / 测试 / 日志 / 配置密钥 / **改完必做清单** | [`docs/code-rules/conventions.md`](docs/code-rules/conventions.md) |
 | **加一个接口**（含可照抄的四步与踩坑速查） | [`docs/code-rules/api.md`](docs/code-rules/api.md) |

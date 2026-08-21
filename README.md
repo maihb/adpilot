@@ -122,7 +122,24 @@ curl -H "Authorization: Bearer $TOKEN" localhost:8000/api/clients
 
 客户那一侧走**邀请码**：运营给某个客户生成一个码，渲染成二维码发出去，客户扫了就
 换到一张 7 天的票，之后只能看自己的数据（`/api/portal/*`，全只读）。`make seed`
-跑完会直接打印一个可用的码。
+跑完会给**每个**示例客户各打印一个码。
+
+### 客户端（H5）
+
+客户看到的那四屏。它走 vite 的 dev proxy 连后端，所以后端要先跑着：
+
+```bash
+npm --prefix client install
+make client        # 起 H5 开发服务器（默认 http://localhost:5173）
+```
+
+打开之后把 `make seed` 打印的任意一个邀请码粘进去。三个示例客户各演示一种情况，
+其中「示例｜户外装备」的账户已暂停投放 —— 用它可以看到**「近期无消耗」而不是
+「还能撑 0 天」**，那是这套界面里最容易写错的一条边界。
+
+微信小程序端是 `npm --prefix client run build:mp-weixin`，产物用微信开发者工具
+导入 `client/dist/build/mp-weixin`。**它需要你自己的 AppID**，所以 H5 是默认的
+演示路径 —— 评估这个项目不该先要求你去注册一个小程序账号。
 
 示例数据是 3 个客户、4 个广告账户、28 天日指标，跨 Meta / TikTok、跨三种币种与三个
 时区。它**只添不改**，重复跑安全；`ENVIRONMENT=prod` 时直接拒绝执行。
@@ -161,6 +178,10 @@ make migrate      # 把库升到最新 schema
 make seed         # 灌脱敏示例数据（先 make migrate）
 make revision m='加一列 xxx'   # 改完 models/ 生成迁移草稿，**要人看一遍再提交**
 make test-int     # 集成测试，需要 make up 那套环境 + 先 make migrate
+make client       # 起客户端 H5 开发服务器（后端要先 make dev 跑着）
+make client-check # 客户端门禁：vue-tsc + 三个纯函数的单测
+make openapi      # 改了后端出参形状之后跑它：重新生成前端 TS 类型
+                  #   不跑的话 CI 的 frontend job 会红（类型和后端对不上）
 make up / rebuild / down / logs   # rebuild = 改了代码之后重建镜像再换上去
 ```
 
@@ -189,7 +210,7 @@ make 只是短名字，没有额外逻辑 —— 每个 target 展开成什么�
 | D3–D5 | 领域模型、文件导入、REST 接口 | 导入一份 CSV，能查出归一化日指标 | ✅ |
 | D6–D8 | Celery + RabbitMQ、Mongo 快照、规则引擎 | 任务异步执行且能重试，余额告警能触发 | ✅ |
 | D9 | 认证、授权作用域、邀请码 | 拿别人的 token 查不到我的数据，且有测试盯着 | ✅ |
-| D10–D11 | uni-app 客户端 | 微信小程序与 H5 双端可用 | ⬜ |
+| D10–D11 | uni-app 客户端 | H5 端可用；小程序端编译通过，运行时需自备开发者工具 | ✅ |
 | D12 | Vue 3 内部后台 | 客户管理、导入、邀请码生成能在页面上走完 | ⬜ |
 | D13–D14 | LLM 日报与诊断 | 日报里有那一行说人话的结论 | ⬜ |
 | D15 | 文档、截图、部署 | 陌生人能在五分钟内跑起来 | ⬜ |

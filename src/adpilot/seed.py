@@ -615,33 +615,41 @@ def _bump(summary: SeedSummary, **deltas: int) -> SeedSummary:
     )
 
 
-async def issue_demo_invite(session: AsyncSession) -> tuple[str, str]:
-    """给第一个示例客户发一个邀请码，返回 (客户名, **明文码**)。
+async def issue_demo_invites(session: AsyncSession) -> list[tuple[str, str]]:
+    """给**每个**示例客户各发一个邀请码，返回 [(客户名, **明文码**)]。
 
-    **每次跑 seed 都新发一个**，旧的仍然有效。这看起来违反了本模块「只添不改」
+    **每次跑 seed 都新发一批**，旧的仍然有效。这看起来违反了本模块「只添不改」
     的调子，其实正合它：新发是「添」，而明文码存不下来（库里是哈希），不重新发
     的话第二次跑 seed 的人就再也拿不到一个能用的码了。
 
     🔴 **码是随机生成的，不是写死在源码里的常量。** 写死一个「demo 码」等于往
     公开仓库里放一把人人皆知的钥匙 —— 哪怕它只对示例数据有效，也会有人把 seed
     跑在一个已经有真实客户的库上。有测试盯着这件事（`tests/test_seed.py`）。
+
+    **为什么每个客户都发**（原先只发第一个）：四个示例账户各演示一种规则结局，
+    而客户端一张票只能看一个客户。只发第一个客户的码，那条最容易写错的边界 ——
+    「暂停投放 → 日均为 0 → 可撑天数**无定义**，不是 0 天」—— 在界面上就永远
+    看不到，因为那个账户在最后一个客户名下。
     """
-    client = await session.scalar(select(Client).where(Client.name == _PLAN[0].name))
-    if client is None:  # pragma: no cover - seed 刚跑完，这个客户一定在
-        raise RuntimeError(f"示例客户不存在：{_PLAN[0].name}")
+    issued: list[tuple[str, str]] = []
+    for plan in _PLAN:
+        client = await session.scalar(select(Client).where(Client.name == plan.name))
+        if client is None:  # pragma: no cover - seed 刚跑完，这些客户一定都在
+            raise RuntimeError(f"示例客户不存在：{plan.name}")
 
-    _, code = await invite_service.create(session, client_id=client.id)
-    return client.name, code
+        _, code = await invite_service.create(session, client_id=client.id)
+        issued.append((client.name, code))
+    return issued
 
 
-async def _run(settings: Settings) -> tuple[SeedSummary, str, str]:
+async def _run(settings: Settings) -> tuple[SeedSummary, list[tuple[str, str]]]:
     engine = create_engine(settings)
     factory = create_session_factory(engine)
     try:
         async with transaction(factory) as session:
             summary = await seed(session)
-            client_name, code = await issue_demo_invite(session)
-            return summary, client_name, code
+            invites = await issue_demo_invites(session)
+            return summary, invites
     finally:
         # 不 dispose 的话进程退出时 asyncpg 会抱怨连接被 GC 掉，那个报错跟真正
         # 发生的事毫无关系，只会干扰下一个读日志的人。
@@ -661,7 +669,12 @@ def main() -> None:
             "确实要在类生产环境演示，先把 .env 里的 ENVIRONMENT 改掉。"
         )
 
-    summary, invite_client, invite_code = asyncio.run(_run(settings))
+    summary, invites = asyncio.run(_run(settings))
+
+    # 每个客户一段：名字一行、码一行。中文名宽度不定，硬凑成一列对不齐。
+    invite_lines = "\n".join(f"  {name}\n    {code}" for name, code in invites)
+    # 拿最后一个客户举例：它就是那个暂停投放的账户所属的客户（见 _PLAN 的顺序）。
+    idle_client, idle_code = invites[-1]
 
     # 这里用 print 不用 log：给人看的命令行回执，不该被 structlog 的 JSON 格式
     # 包起来 —— prod 下那套格式正是为机器准备的，而这个模块只在 dev 下跑。
@@ -672,8 +685,8 @@ def main() -> None:
         f"  日指标  新增 {summary.metrics_inserted} 行，已存在 {summary.metrics_existing} 行\n"
         f"  余额    新录 {summary.balances_recorded}，已存在 {summary.balances_existing}\n"
         "\n"
-        f"「{invite_client}」的邀请码（每次跑 seed 都新发一个，只显示这一次）：\n"
-        f"  {invite_code}\n"
+        "每个示例客户各一个邀请码（每次跑 seed 都新发，且只显示这一次）：\n"
+        f"{invite_lines}\n"
         "\n"
         "接下来 —— 内部接口都要运营 token（账号在 .env 的 OPERATOR_USERNAME）：\n"
         "  TOKEN=$(curl -sX POST localhost:8000/api/auth/login \\\n"
@@ -683,10 +696,13 @@ def main() -> None:
         '  curl -H "Authorization: Bearer $TOKEN" -X POST localhost:8000/api/alerts/sweep'
         "   # 应当得到 2 条告警\n"
         "\n"
-        "客户那一侧不需要运营 token，拿上面那个码换一张 7 天的票：\n"
+        "客户那一侧不需要运营 token，拿其中任意一个码换一张 7 天的票：\n"
         f"  curl -sX POST localhost:8000/api/auth/redeem \\\n"
         "      -H 'Content-Type: application/json' \\\n"
-        f'      -d \'{{"code":"{invite_code}"}}\''
+        f'      -d \'{{"code":"{idle_code}"}}\'\n'
+        "\n"
+        f"上面这个码是「{idle_client}」的 —— 它的账户已暂停投放，拿它进客户端可以看到\n"
+        "「可撑天数无定义」长什么样：那是「近期没花钱，算不出来」，不是「还能撑 0 天」。"
     )
 
 

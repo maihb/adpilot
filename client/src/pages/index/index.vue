@@ -75,6 +75,12 @@ function runwayClass(runway: PortalRunway | null): string {
   return runway.is_alerting ? 'danger' : 'ok'
 }
 
+function openAccount(account: PortalAccount): void {
+  // 账户名进 URL 要编码：示例数据里的名字带空格和短横，真实客户名还可能带 & 和 #。
+  const name = encodeURIComponent(account.name)
+  uni.navigateTo({ url: `/pages/account/account?id=${account.id}&name=${name}` })
+}
+
 /** 日均消耗的窗口里缺了几天，这个日均（以及可撑天数）就要打个问号。 */
 function coverageNote(runway: PortalRunway | null): string {
   if (!runway || runway.days_with_data === null || runway.lookback_from === null) {
@@ -97,7 +103,13 @@ function coverageNote(runway: PortalRunway | null): string {
     <view v-else-if="error" class="state">{{ error }}</view>
     <view v-else-if="!cards.length" class="state">还没有广告账户，等投放负责人配置。</view>
 
-    <view v-for="card in cards" :key="card.account.id" class="card">
+    <view
+      v-for="card in cards"
+      :key="card.account.id"
+      class="card"
+      hover-class="card-hover"
+      @tap="openAccount(card.account)"
+    >
       <view class="card-head">
         <text class="name">{{ card.account.name }}</text>
         <text v-if="!card.account.is_active" class="tag">已停投</text>
@@ -152,6 +164,9 @@ function coverageNote(runway: PortalRunway | null): string {
   border-radius: 16rpx;
   padding: 28rpx;
   margin-bottom: 20rpx;
+}
+.card-hover {
+  background: #f0f2f5;
 }
 .card-head {
   display: flex;

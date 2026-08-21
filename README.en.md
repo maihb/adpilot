@@ -139,8 +139,28 @@ curl -H "Authorization: Bearer $TOKEN" localhost:8000/api/clients
 
 Clients get in through an **invite code**: an operator generates one, renders it as
 a QR code, and the client scans it to receive a 7-day token that can only read
-their own data (`/api/portal/*`, read-only). `make seed` prints a usable code when
-it finishes.
+their own data (`/api/portal/*`, read-only). `make seed` prints one code for
+**each** sample client when it finishes.
+
+### Client app (H5)
+
+The four screens your clients see. It reaches the backend through vite's dev proxy,
+so the backend has to be running:
+
+```bash
+npm --prefix client install
+make client        # H5 dev server, http://localhost:5173 by default
+```
+
+Paste any of the invite codes `make seed` printed. The three sample clients each
+demonstrate a different situation; the accounts under "示例｜户外装备" are paused,
+so that one shows **"no recent spend" rather than "0 days left"** — the edge case
+this UI is easiest to get wrong.
+
+For WeChat Mini Program, run `npm --prefix client run build:mp-weixin` and import
+`client/dist/build/mp-weixin` into WeChat DevTools. **That needs your own AppID**,
+which is why H5 is the default demo path — evaluating this project should not start
+with registering a Mini Program account.
 
 The sample data is 3 clients and 4 ad accounts with 28 days of daily metrics,
 spanning Meta / TikTok, three currencies and three time zones. It **only adds,
@@ -185,6 +205,10 @@ make migrate      # bring the database up to the latest schema
 make seed         # load anonymised sample data (run make migrate first)
 make revision m='add column xxx'   # draft a migration after editing models/ — **review it before committing**
 make test-int     # integration tests, needs the `make up` stack + `make migrate` first
+make client       # client H5 dev server (backend must be running via make dev)
+make client-check # client gates: vue-tsc + the three pure-function test files
+make openapi      # run after changing backend response shapes: regenerate TS types
+                  #   skip it and CI's frontend job goes red (types drift from the API)
 make up / rebuild / down / logs   # rebuild = rebuild the image after a code change
 ```
 
@@ -214,7 +238,7 @@ that is merely recommended rots; if it matters here, it fails the build.
 | D3–D5 | Domain model, file import, REST API | Import a CSV, query normalised daily metrics | ✅ |
 | D6–D8 | Celery + RabbitMQ, Mongo snapshots, rule engine | Tasks run async with retries; balance alert fires | ✅ |
 | D9 | Authentication, authorisation scope, invite codes | Someone else's token cannot reach my data, and a test says so | ✅ |
-| D10–D11 | uni-app client | Mini Program and H5 both running | ⬜ |
+| D10–D11 | uni-app client | H5 running; Mini Program compiles, runtime needs your own DevTools | ✅ |
 | D12 | Vue 3 admin console | Client management, imports and invite codes usable from the UI | ⬜ |
 | D13–D14 | LLM reports and diagnosis | Report carries the one line of plain English that matters | ⬜ |
 | D15 | Docs, screenshots, deploy | A stranger can run it within five minutes | ⬜ |

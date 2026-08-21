@@ -358,14 +358,18 @@ docker compose up -d → migrate → seed（打印一个随机邀请码）
 
 ## 十三、对既有文档的修改
 
-按 CLAUDE.md 的规矩，落地时与代码进同一个 PR：
+按 CLAUDE.md 的规矩，与代码进同一个 PR。落地进度：
 
-1. **主文档第七节**「uni-app 客户端」那条：勾上，并把范围指针指到本篇
-2. **[`architecture.md`](../code-rules/architecture.md) 的目录结构**：补 `client/`
-   （它在 `src/adpilot/` 之外，不进分层契约 —— 但目录树声称自己是全仓库的地图）
-3. **`README.md` 快速开始**：接上起 H5 的那一步；路线图 D10–D11 勾上。
-   ⚠️ **`README.en.md` 要同步**，它是译本不是真相源，两边内容必须一致
-4. **新增 [`docs/business/`](../business/) 一篇**：客户端有哪几屏、每屏的口径写法
-   —— §4 那四条是业务规则不是实现细节，它们得有个 `business/` 里的家
-5. **`.github/workflows/ci.yml`**：新增 frontend job
-6. **CLAUDE.md 的「护栏一览」**：补两行（类型生成门禁、`Number(` 那条 ESLint）
+1. ✅ **主文档第七节**「uni-app 客户端」那条：**没有勾上** —— 日报那一屏还缺
+   （日报服务要等 D12–D13）。按「部分完成的不打勾」，改成写清还剩什么
+2. ✅ **[`architecture.md`](../code-rules/architecture.md) 的目录结构**：补了
+   `client/`（它在 `src/adpilot/` 之外，不进分层契约 —— 但目录树声称自己是全
+   仓库的地图）
+3. ✅ **`README.md` 快速开始**：接上了起 H5 的那一步；路线图 D10–D11。
+   `README.en.md` 同步改了 —— 它是译本不是真相源，两边内容必须一致
+4. ✅ **新增 [`docs/business/client-app.md`](../business/client-app.md)**：四屏、
+   以及 §4 那四条口径规则。它**没有自己的 OpenAPI tag**（是 `portal` 的消费方），
+   所以索引表那一列填「—」，不进 `test_business_docs.py` 的双向检查
+5. ✅ **`.github/workflows/ci.yml`**：新增了 frontend job
+6. ✅ **CLAUDE.md 的「护栏一览」**：补了两行（类型生成门禁、`Number(` 那条 ——
+   最终是 pytest 扫源码不是 ESLint，理由见 §9）
