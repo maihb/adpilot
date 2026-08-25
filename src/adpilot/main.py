@@ -20,10 +20,12 @@ from adpilot.api import (
     auth,
     balance,
     client,
+    credential,
     daily_metric,
     health,
     imports,
     invite,
+    oauth,
     portal,
     product,
     report,
@@ -81,6 +83,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(health.router, prefix=settings.api_prefix)
     # 换 token 的入口自己不能要 token。
     app.include_router(auth.router, prefix=settings.api_prefix)
+    # OAuth 回调**不认证**：平台把人跳转回来，而浏览器跳转带不了 Authorization
+    # 头。它的防护是 `state`（签名 + 过期 + 用途三重校验，见 api/oauth.py 的模块
+    # docstring）。这是第五条进 tests/test_auth_guard.py 豁免清单的路由。
+    app.include_router(oauth.router, prefix=settings.api_prefix)
     # 客户端：作用域依赖写在每个路由自己身上（`ClientScopeDep` 是个有返回值的
     # 依赖，handler 要用它解出来的 client_id），所以这里不像下面那样统一挂。
     # 漏声明一个会被 tests/test_auth_guard.py 拦下 —— 那条测试遍历
@@ -95,6 +101,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         client.router,
         invite.router,
         ad_account.router,
+        credential.router,
         imports.router,
         daily_metric.router,
         balance.router,

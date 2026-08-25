@@ -58,3 +58,22 @@ class QuotaExceededError(DomainError):
     与「供应商限流」不是一回事：这是**本地闸门**，为的是防一个写错的循环在夜里
     把额度跑光。自托管意味着花的是使用者自己的钱，没有人替他兜底。
     """
+
+
+class UpstreamError(DomainError):
+    """外部平台那边失败了（拉数据、换 token）→ 502。
+
+    **与 `InvalidDataError` 分开**：后者的意思是「你送进来的东西不对」，这条的
+    意思是「我们和平台之间出了问题」。混成一个的话，接口会对着一次平台限流回
+    422，而 422 的言下之意是「改请求体再试」—— 那是一条把人引向错误方向的提示。
+
+    🔴 **`retryable` 是给 `tasks/` 用的，不是给接口用的。** 同一个服务函数既被
+    HTTP 请求调用、也被排期任务调用，而两者对「该不该重试」的处置完全不同：接口
+    当场把错误告诉人，任务要决定是退避重试还是直接进死信队列。判定本身来自
+    provider（那是平台知识，见 `providers/base.py` 的 `FetchError`），这一层只
+    负责把它原样带过来。
+    """
+
+    def __init__(self, message: str, *, retryable: bool) -> None:
+        super().__init__(message)
+        self.retryable = retryable

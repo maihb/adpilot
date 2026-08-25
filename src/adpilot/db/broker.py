@@ -41,6 +41,7 @@ from adpilot.config import Settings
 TASK_NORMALIZE_ACCOUNT: Final = "adpilot.normalize_account"
 TASK_SWEEP_ALERTS: Final = "adpilot.sweep_alerts"
 TASK_GENERATE_DUE_REPORTS: Final = "adpilot.generate_due_reports"
+TASK_FETCH_DUE_ACCOUNTS: Final = "adpilot.fetch_due_accounts"
 
 # 巡检的排期。**每小时一次，不是每天一次。**
 #
@@ -64,6 +65,22 @@ SWEEP_SCHEDULE_MINUTE: Final = 0
 #: 错开 20 分是为了不和巡检抢同一分钟：两个任务都会在整点被投出来，而巡检的结果
 #: （新开的告警）正是日报要引用的东西 —— 让它先跑完。
 REPORTS_SCHEDULE_MINUTE: Final = 20
+
+#: 自动拉取的排期。**第三个整点任务，而这个数字不是随手挑的。**
+#:
+#: 三个任务在一小时里是这样接起来的：
+#:
+#:     :40 拉取 ──20分钟──▶ :00 巡检（用刚拉到的数判告警）──20分钟──▶ :20 日报
+#:
+#: 20 分钟是留给拉取跑完的余量 —— 多账户 × 多层级 × 退避重试，比两条 SQL 慢得
+#: 多。放在 :50 会让数据更新鲜，但拉取一慢就会和巡检抢在同一时刻，而那时谁先跑
+#: 完取决于 worker 取消息的顺序，正是上面那条排期规则要避免的情形。
+#:
+#: 密而不贵和日报同理，靠的是判定本身：**那天已经成功拉过就跳过**
+#: （`services/fetch.py` 的 `due_accounts`），所以绝大多数轮次什么都不做。
+#: 差别是拉取**不花钱**，所以它没有「撞额度就整轮中断」那条 —— 一个账户的
+#: token 失效不该让其它账户跟着停更。
+FETCH_SCHEDULE_MINUTE: Final = 40
 
 MAIN_QUEUE: Final = "adpilot"
 DEAD_LETTER_QUEUE: Final = "adpilot.dead"
@@ -170,6 +187,11 @@ def create_celery_app(settings: Settings, *, include: Sequence[str] = ()) -> Cel
             "generate-due-reports-hourly": {
                 "task": TASK_GENERATE_DUE_REPORTS,
                 "schedule": crontab(minute=REPORTS_SCHEDULE_MINUTE),
+                "options": {"queue": MAIN_QUEUE},
+            },
+            "fetch-due-accounts-hourly": {
+                "task": TASK_FETCH_DUE_ACCOUNTS,
+                "schedule": crontab(minute=FETCH_SCHEDULE_MINUTE),
                 "options": {"queue": MAIN_QUEUE},
             },
         },

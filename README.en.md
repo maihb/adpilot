@@ -13,12 +13,15 @@ server.
 
 [中文（主）](README.md) · [Design doc (zh)](docs/design/2026-08-19-mvp-design.md)
 
-> **Status: milestone D1–D18 of 18 — the whole MVP scope is done.** The chain is:
-> import a CSV → raw snapshot → normalised daily metrics → rule sweep → alert
-> push → **daily report** (numbers computed in code, prose drafted by an LLM,
-> publishable only after a human edits it) → the client sees the published one.
-> Both front ends are in: an operator edits and publishes in the admin console,
-> and the client app only ever shows published reports. The [roadmap](#roadmap) marks what
+> **Status: milestone D1–D19 of 19 — the whole MVP scope is done.** The chain is:
+> **pull from the platform API** (or import a CSV) → raw snapshot → normalised
+> daily metrics → rule sweep → alert push → **daily report** (numbers computed in
+> code, prose drafted by an LLM, publishable only after a human edits it) → the
+> client sees the published one. Both front ends are in: an operator edits and
+> publishes in the admin console, and the client app only ever shows published
+> reports. Since D19 the TikTok side is automatic — and **a failed pull raises an
+> alert**, because "spent $0 yesterday" and "the pull stopped" look identical on
+> a dashboard. The [roadmap](#roadmap) marks what
 > is real and what is not — this README will never claim a feature that does not
 > exist.
 
@@ -45,8 +48,8 @@ It was built by someone running ads for clients, to kill four specific chores:
 ```mermaid
 flowchart TB
     subgraph ingest["Ingest — ReportProvider adapters"]
-        F["FileImportProvider<br/>(CSV/XLSX export)"]
-        T["TikTokAdsProvider<br/>(interface reserved)"]
+        F["FileImportProvider<br/>(CSV export)"]
+        T["TikTokProvider<br/>(Marketing API v1.3)"]
         M["MetaAdsProvider<br/>(interface reserved)"]
     end
 
@@ -385,13 +388,16 @@ regrows itself, the latter only holds messages still in flight.
 | D16 | Stock-out alerts | Two stock imports are enough to compute runway and open a client-level alert | ✅ |
 | D17 | Action log UI | An operator gets through the day without curl: import → alerts → log a change → report → publish | ✅ |
 | D18 | Scheduled reports | Import the data and click nothing; the next hourly run drafts the report, and never twice | ✅ |
+| D19 | Automatic pull (TikTok) | Attach an authorisation and stop importing CSVs; **a failed pull raises an alert** instead of passing 0 spend off as no activity | ✅ |
 
-**Deliberately out of scope for v1:** no live Ads API (the adapter interface is
-reserved — platform app review takes longer than this milestone), no multi-tenant
-SaaS mode, no automated budget changes, no creative asset management, no user
-management (the operator account comes from environment variables — single
-instance, single operator), no token revocation list (the price of self-contained
-tokens, see the [auth notes](docs/business/auth.md), in Chinese).
+**Deliberately out of scope for v1:** no Meta Ads API yet (the adapter interface
+is reserved; TikTok came first because that is where the live spend is — Meta
+credentials are in fact quicker to obtain, but there would be nothing to pull),
+no creative or comment ingestion, no multi-tenant SaaS mode, **no automated budget
+changes** (only read scopes are requested, so it is impossible at the credential
+level), no user management (the operator account comes from environment variables
+— single instance, single operator), no token revocation list (the price of
+self-contained tokens, see the [auth notes](docs/business/auth.md), in Chinese).
 
 ## Contributing
 

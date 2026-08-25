@@ -102,6 +102,10 @@ class AdAccountResponse(BaseModel):
     timezone: str
     is_active: bool
 
+    #: 挂着哪个平台凭据。**`null` 就是不自动拉取** —— 界面上「已接 API / 手工
+    #: 导入」这个区别只能靠它，而两者的数据新鲜度期望完全不同。
+    credential_id: int | None
+
     #: 要不要每天自动出一份日报（**生成成 draft，绝不自动发布**）。
     auto_report: bool
 

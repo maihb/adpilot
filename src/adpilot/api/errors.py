@@ -26,6 +26,7 @@ from adpilot.services.exceptions import (
     NotFoundError,
     QuotaExceededError,
     ReferenceNotFoundError,
+    UpstreamError,
 )
 
 log = structlog.get_logger(__name__)
@@ -45,6 +46,10 @@ _STATUS_BY_EXCEPTION: Final[dict[type[DomainError], int]] = {
     InvalidDataError: status.HTTP_422_UNPROCESSABLE_CONTENT,
     QuotaExceededError: status.HTTP_429_TOO_MANY_REQUESTS,
     NotConfiguredError: status.HTTP_503_SERVICE_UNAVAILABLE,
+    # 502：**我们和平台之间**出了问题，不是调用方送错了东西。回 422 会让人去改
+    # 请求体，而该做的是重试或者去看凭据 —— 一个把人引向错误方向的状态码，比
+    # 没有状态码更贵。
+    UpstreamError: status.HTTP_502_BAD_GATEWAY,
 }
 
 
@@ -115,6 +120,7 @@ def responses(*codes: int) -> dict[int | str, dict[str, Any]]:
         status.HTTP_413_CONTENT_TOO_LARGE: "上传的文件超过大小上限",
         status.HTTP_422_UNPROCESSABLE_CONTENT: "入参不合法，或引用了不存在的对象",
         status.HTTP_429_TOO_MANY_REQUESTS: "超过了本地设置的用量上限",
+        status.HTTP_502_BAD_GATEWAY: "平台那边失败了（拉数据、换 token）",
         status.HTTP_503_SERVICE_UNAVAILABLE: "服务端缺少必要配置（认证、LLM 等）",
     }
     return {code: {"model": ErrorResponse, "description": described[code]} for code in codes}

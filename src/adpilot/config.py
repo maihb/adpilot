@@ -158,6 +158,61 @@ class Settings(BaseSettings):
     llm_input_cost_per_mtok: Decimal = Decimal("0")
     llm_output_cost_per_mtok: Decimal = Decimal("0")
 
+    # --- 自动拉取平台数据（D19 起）-----------------------------------------
+    #
+    # 设计见 docs/design/2026-08-25-ads-api-fetch.md。整段空着是**正常状态**：
+    # 没接 API 的实例照样跑，数据走 CSV 导入进来 —— 那是 MVP 一直支持的形态。
+
+    # 🔴 平台 token 落库时的加密密钥。**丢了 = 所有已授权的凭据全部解不开**，
+    # 只能把每个平台的授权流程重走一遍 —— 这一点和 AUTH_SECRET 有本质区别
+    # （那个丢了只是所有人重新登录一次）。所以它必须进凭据存档，不能只活在
+    # 部署机的 .env 里。
+    #
+    # 空着不算「凭据留了默认值」：`auth/crypto.py` 在密钥缺失或过短时**拒绝
+    # 工作**（抛 CryptoNotConfiguredError），不会退化成「用空串当密钥」那种
+    # 看起来一切正常、实际上等于没加密的状态。生成：openssl rand -base64 32
+    credentials_secret: SecretStr = Field(default=SecretStr(""))
+
+    # TikTok 开发者应用。App ID 不是秘密（它出现在授权 URL 里，用户浏览器看得
+    # 到），secret 是。
+    tiktok_app_id: str = ""
+    tiktok_app_secret: SecretStr = Field(default=SecretStr(""))
+
+    # 空着用 provider 内置的生产地址。**填了就是切沙盒** —— 审核通过之前只有
+    # 沙盒能用，而两者的差别应该只有这一个值。
+    tiktok_api_base_url: str = ""
+
+    # 除核心指标外还要请求哪些，逗号分隔。
+    #
+    # 🔴 收入类指标（GMV）最容易随平台功能改名，而**请求一个不存在的 metric 是
+    # 整个请求 400** —— 一个字段名写错，当天所有账户一行数据都拉不到。所以它们
+    # 走配置而不是写死：沙盒实测确认了名字，填进来就生效，不必改代码重新部署。
+    # 理由详见 providers/tiktok.py 的模块 docstring。
+    tiktok_extra_metrics: str = ""
+
+    # OAuth 回调地址的前缀（`https://adpilot.example.com`，不带末尾斜杠）。
+    #
+    # ⚠️ **必须和开发者后台里填的那个完全一致**，差一个字符平台就拒绝跳转，
+    # 而报错发生在平台那边、我们这边一行日志都不会有。它单独成项而不是从请求的
+    # Host 头推断：Host 是客户端说了算的，用它拼回调地址等于让请求方决定 token
+    # 往哪送。
+    oauth_redirect_base_url: str = ""
+
+    # 每次拉最近几天，**不是只拉昨天**。平台数据在若干天内还会变（归因回传、
+    # 无效流量剔除、汇率重算），只拉昨天那些修正就永远进不来了。
+    #
+    # 这一条几乎不花额外成本：快照 append-only（多拉一天就是多一条快照），
+    # 归一化按唯一键 upsert（同一天拉三次也不会变成三倍花费）—— 滚动窗口在这套
+    # 结构上是免费的，那正是当初养第二个数据库换来的东西。
+    fetch_window_days: int = 3
+
+    # 超过这么多小时没成功拉到数就开告警。
+    #
+    # 定在 26 而不是 24：日切、平台自己的延迟、夏令时那天不是 24 小时，都会让
+    # 「上次成功」的间隔天然地略超一天。卡在 24 会让告警每周误报几次，而一条
+    # 每周误报的告警，三周之后就没人看了。
+    fetch_stale_hours: int = 26
+
     @property
     def llm_is_configured(self) -> bool:
         """调得出模型没有。判断收口在这里，调用方不去比对空字符串。
@@ -171,6 +226,25 @@ class Settings(BaseSettings):
     def llm_prices_are_configured(self) -> bool:
         """填了单价没有。没填就不估成本，记 NULL（见上面那两项）。"""
         return bool(self.llm_input_cost_per_mtok or self.llm_output_cost_per_mtok)
+
+    @property
+    def tiktok_is_configured(self) -> bool:
+        """换得出 token 没有。判断收口在这里，调用方不去比对空字符串。
+
+        **不看 `credentials_secret`**：那一项缺失是另一种故障（存不下也读不出
+        已有凭据），由 `auth/crypto.py` 当场拒绝工作并说清楚缺哪个环境变量。
+        混进这个判据会让「没配 TikTok 应用」和「没配加密密钥」报出同一句话。
+        """
+        return bool(self.tiktok_app_id and self.tiktok_app_secret.get_secret_value())
+
+    @property
+    def tiktok_extra_metric_names(self) -> tuple[str, ...]:
+        """把逗号分隔的配置摊成清单，顺手去掉空项和多余空格。
+
+        容忍尾随逗号和空格是有意的：这个值是人从平台文档里一个个拷过来拼的，
+        而一个多出来的空字符串会让整次请求 400 —— 报错还只会说「metrics 不合法」。
+        """
+        return tuple(name.strip() for name in self.tiktok_extra_metrics.split(",") if name.strip())
 
     @property
     def alerts_are_pushed(self) -> bool:

@@ -173,6 +173,35 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/oauth/tiktok/callback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Complete Tiktok Authorization
+         * @description 平台跳回来的落点：验 `state`、换 token、把凭据（密文）存下来。
+         *
+         *     响应是刚建好的那条凭据，**里面没有 token**。看到它就说明授权成功了 ——
+         *     回后台的凭据页刷新，把广告账户挂上去，自动拉取才真正开始。
+         *
+         *     `state` 不合法或过期返回 404（对一个纯跳转地址，「这里没有东西」比「你的
+         *     凭证不对」少泄露一点信息）；换 token 失败返回 502。
+         *
+         *     ⚠️ **`auth_code` 是一次性的**，失败了不能刷新页面重试 —— 平台会告诉你这个
+         *     码已经用过。重新从后台点一次「发起授权」。
+         */
+        get: operations["completeTikTokAuthorization"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/portal/me": {
         parameters: {
             query?: never;
@@ -498,6 +527,161 @@ export interface paths {
          *     `account_id` 上。真要换就建一个新账户、把旧的停用。
          */
         patch: operations["updateAdAccount"];
+        trace?: never;
+    };
+    "/api/credentials/authorize-url": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Authorize Url
+         * @description 拿一个「去平台点同意」的地址。前端**直接跳转**过去，不要用 iframe。
+         *
+         *     这一步不写任何东西 —— 凭据要等平台把人跳回
+         *     `GET /api/oauth/tiktok/callback` 才落库。所以重复点这个按钮是安全的。
+         *
+         *     没配 `TIKTOK_APP_ID` / `TIKTOK_APP_SECRET` / `OAUTH_REDIRECT_BASE_URL` 时
+         *     返回 503：那是部署方的问题，不是点按钮的人的问题。
+         */
+        post: operations["createAuthorizeUrl"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/credentials": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Credentials
+         * @description 全部平台授权，新的在前。**不分页** —— 凭据按授权来，个位数。
+         *
+         *     🔴 出参里没有任何形式的 token，密文也没有。要换 token 只有一条路：重新走
+         *     一次授权。
+         */
+        get: operations["listCredentials"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/credentials/{credential_id}/deactivate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Deactivate Credential
+         * @description 停用一个凭据：挂在它上面的账户从此不再被排期扫到。
+         *
+         *     **不是删除。** 删掉之后那些历史快照的来源就成了无头案，而且挂着账户的凭据
+         *     在数据库层面（RESTRICT）也删不掉。
+         *
+         *     ⚠️ 停用**不影响手动触发**：先停用、再手动补一段历史，是一条正当路径。
+         */
+        post: operations["deactivateCredential"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/ad-accounts/{account_id}/credential": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Attach Account Credential
+         * @description 把账户挂到某个平台凭据上，`credential_id: null` 表示解绑。
+         *
+         *     🔴 **挂上去就等于打开了自动拉取**，解绑就等于关掉 —— 没有第二个开关
+         *     （`models/ad_account.py` 的 `credential_id` 讲了为什么不设）。
+         *
+         *     平台对不上（TikTok 的账户挂到 Meta 的凭据上）返回 422：那种配置的症状是每次
+         *     拉取都被平台拒绝，而那个报错完全不提「你挂错了」。
+         */
+        put: operations["attachAccountCredential"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/ad-accounts/{account_id}/fetch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Fetch Account Data
+         * @description 立刻从平台拉一次这个账户的数据。**排期任务走的是同一个服务函数。**
+         *
+         *     三个场景要它：授权刚配好想当场验证通不通；平台回填了很久以前的数据要重拉一段
+         *     历史；排期那次失败了，修好之后补一次。
+         *
+         *     **同步拉，异步归一化**：拉取要当场把成败告诉人（token 失效、账户挂错凭据，
+         *     都是要人立刻动手的事），而归一化重、且没人需要盯着看 —— 响应里的 `task_id`
+         *     拿去 `GET /api/tasks/{task_id}` 看进度。`task_id` 为 `null` 表示队列连不上，
+         *     **快照已经落好了**，补触发一次归一化即可，别重新拉（那只会多一条快照）。
+         *
+         *     没挂凭据返回 422；平台那边出问题返回 502；`CREDENTIALS_SECRET` 缺失或换过
+         *     返回 503。
+         */
+        post: operations["fetchAccountData"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/ad-accounts/{account_id}/fetch-state": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Account Fetch State
+         * @description 这个账户的自动拉取健康度：上次什么时候成的、现在连着失败几次了。
+         *
+         *     ⚠️ **从来没拉过返回 404，不是一份全空的记录。** 两者含义完全不同：前者是
+         *     「这个账户没接自动拉取」，后者会被读成「接了，只是还没跑」—— 而在一个靠
+         *     「数据新不新」判断可信度的系统里，这个区别不能靠猜。
+         */
+        get: operations["getAccountFetchState"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/imports": {
@@ -1147,6 +1331,8 @@ export interface components {
             timezone: string;
             /** Is Active */
             is_active: boolean;
+            /** Credential Id */
+            credential_id: number | null;
             /** Auto Report */
             auto_report: boolean;
             /** Report Delay Hours */
@@ -1239,6 +1425,25 @@ export interface components {
          * @enum {string}
          */
         AlertStatus: "open" | "resolved";
+        /**
+         * AttachCredentialRequest
+         * @description 把账户挂到某个凭据上，`null` 表示解绑（从此不再自动拉取）。
+         */
+        AttachCredentialRequest: {
+            /** Credential Id */
+            credential_id?: number | null;
+        };
+        /**
+         * AuthorizeUrlResponse
+         * @description 把人送去平台点「同意」的那个地址。
+         *
+         *     前端**直接跳转**过去，不要用 iframe 或弹窗打开：平台的授权页会拒绝被嵌套，
+         *     而那个失败在控制台里表现为一条 X-Frame-Options 报错，跟授权流程毫无关系。
+         */
+        AuthorizeUrlResponse: {
+            /** Url */
+            url: string;
+        };
         /** BalanceAlertListResponse */
         BalanceAlertListResponse: {
             /** Items */
@@ -1471,6 +1676,42 @@ export interface components {
             is_active?: boolean | null;
         };
         /**
+         * CredentialCreateRequest
+         * @description 发起授权时要填的东西。目前只有一个名字。
+         */
+        CredentialCreateRequest: {
+            /** Label */
+            label: string;
+        };
+        /**
+         * CredentialRead
+         * @description 一条平台授权。
+         *
+         *     🔴 **没有 token 字段，一个都没有** —— 密文也不给。存进库的密文本身没有直接
+         *     危害，但把它下发给前端就意味着它会经过日志、浏览器缓存和任何一个中间层，
+         *     而那些地方的留存策略没有人在管。要换 token 只有一条路：重新走一次授权。
+         */
+        CredentialRead: {
+            /** Id */
+            id: number;
+            platform: components["schemas"]["Platform"];
+            /** Provider */
+            provider: string;
+            /** Label */
+            label: string;
+            /** External Account Ids */
+            external_account_ids: string[];
+            /** Expires At */
+            expires_at: string | null;
+            /** Is Active */
+            is_active: boolean;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /**
          * DailyMetricItem
          * @description 内部接口的一行：带层级和对象，客户端那套没有这几样。
          */
@@ -1567,6 +1808,67 @@ export interface components {
         ErrorResponse: {
             /** Detail */
             detail: string;
+        };
+        /**
+         * FetchRequest
+         * @description 手动触发一次拉取。三项都可以不填。
+         */
+        FetchRequest: {
+            /** Since */
+            since?: string | null;
+            /** Until */
+            until?: string | null;
+            /** Levels */
+            levels?: components["schemas"]["MetricLevel"][] | null;
+        };
+        /**
+         * FetchResponse
+         * @description 一次拉取的结果摘要。**不回数据本身** —— 那可能是几千行。
+         */
+        FetchResponse: {
+            /** Account Id */
+            account_id: number;
+            /** Provider */
+            provider: string;
+            /**
+             * Since
+             * Format: date
+             */
+            since: string;
+            /**
+             * Until
+             * Format: date
+             */
+            until: string;
+            /** Levels */
+            levels: components["schemas"]["MetricLevel"][];
+            /** Snapshots */
+            snapshots: number;
+            /** Rows */
+            rows: number;
+            /** Balance Captured */
+            balance_captured: boolean;
+            /** Task Id */
+            task_id: string | null;
+        };
+        /**
+         * FetchStateRead
+         * @description 某个账户的自动拉取健康度。
+         *
+         *     ⚠️ **接口在「从来没拉过」时返回 404 而不是一份全空的记录**：两者的含义完全
+         *     不同 —— 前者是「这个账户没接自动拉取」，后者会被读成「接了，只是还没跑」。
+         */
+        FetchStateRead: {
+            /** Account Id */
+            account_id: number;
+            /** Last Attempt At */
+            last_attempt_at: string | null;
+            /** Last Success At */
+            last_success_at: string | null;
+            /** Last Error */
+            last_error: string | null;
+            /** Consecutive Failures */
+            consecutive_failures: number;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -2581,6 +2883,67 @@ export interface operations {
             };
         };
     };
+    completeTikTokAuthorization: {
+        parameters: {
+            query: {
+                /** @description 平台回调带回来的一次性授权码 */
+                auth_code: string;
+                /** @description 发起授权时我们自己签的那个 state */
+                state: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CredentialRead"];
+                };
+            };
+            /** @description 资源不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description 平台那边失败了（拉数据、换 token） */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 服务端缺少必要配置（认证、LLM 等） */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     getPortalProfile: {
         parameters: {
             query?: never;
@@ -3382,6 +3745,308 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    createAuthorizeUrl: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CredentialCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthorizeUrlResponse"];
+                };
+            };
+            /** @description 没带 token、token 无效或已过期 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description 服务端缺少必要配置（认证、LLM 等） */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    listCredentials: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CredentialRead"][];
+                };
+            };
+            /** @description 没带 token、token 无效或已过期 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    deactivateCredential: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                credential_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CredentialRead"];
+                };
+            };
+            /** @description 没带 token、token 无效或已过期 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    attachAccountCredential: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                account_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AttachCredentialRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdAccountResponse"];
+                };
+            };
+            /** @description 没带 token、token 无效或已过期 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 入参不合法，或引用了不存在的对象 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    fetchAccountData: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                account_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FetchRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FetchResponse"];
+                };
+            };
+            /** @description 没带 token、token 无效或已过期 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 入参不合法，或引用了不存在的对象 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 平台那边失败了（拉数据、换 token） */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 服务端缺少必要配置（认证、LLM 等） */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    getAccountFetchState: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                account_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FetchStateRead"];
+                };
+            };
+            /** @description 没带 token、token 无效或已过期 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

@@ -16,6 +16,7 @@ const KIND_NAMES: Record<string, string> = {
   balance_low: '余额',
   metric_anomaly: '指标异动',
   stock_low: '库存',
+  fetch_failed: '数据停更',
 }
 
 const items = ref<Alert[]>([])

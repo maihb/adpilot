@@ -35,6 +35,7 @@ TASK_MODULES: Final = (
     "adpilot.tasks.normalize",
     "adpilot.tasks.alerts",
     "adpilot.tasks.reports",
+    "adpilot.tasks.fetch",
 )
 
 celery_app = create_celery_app(get_settings(), include=TASK_MODULES)

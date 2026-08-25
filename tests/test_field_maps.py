@@ -14,6 +14,7 @@ from adpilot.models.daily_metric import MetricLevel
 from adpilot.services.field_maps import (
     CLICKS_COLUMNS,
     OBJECT_ID_COLUMNS,
+    OBJECT_NAME_COLUMNS,
     SPEND_COLUMNS,
     canonical,
     find_column,
@@ -114,3 +115,29 @@ def test_int_accepts_trailing_zero_decimals() -> None:
     """平台偶尔把计数导成 `1,234.0`，直接 int() 会在小数点上炸。"""
     assert parse_int("1,234.0") == 1234
     assert parse_int("1234") == 1234
+
+
+def test_tiktok_api_dimension_names_are_recognised() -> None:
+    """TikTok API 的维度名要能被认出来 —— **每一层都要**。
+
+    D19 实跑逮到的：账户级的候选里少了 `advertiser_id`，于是账户层的快照一归一化
+    就报「找不到对象 ID 列」。单测发现不了 —— provider 那边的用例只验产物形状，
+    验不到下游读不读得懂。
+
+    `advertiser_id` 和 AD 层的 `adid` **不会撞**：前缀匹配下 "advertiserid" 不以
+    "adid" 开头。这条把那件事也钉住了。
+    """
+    rows = {
+        MetricLevel.ACCOUNT: {"advertiser_id": "7001", "advertiser_name": "示例账户"},
+        MetricLevel.CAMPAIGN: {"campaign_id": "c1", "campaign_name": "示例系列"},
+        MetricLevel.ADGROUP: {"adgroup_id": "g1", "adgroup_name": "示例组"},
+        MetricLevel.AD: {"ad_id": "a1", "ad_name": "示例广告"},
+    }
+
+    for level, row in rows.items():
+        id_column = find_column(row, OBJECT_ID_COLUMNS[level])
+        name_column = find_column(row, OBJECT_NAME_COLUMNS[level])
+
+        assert id_column is not None, f"{level} 认不出对象 ID 列"
+        assert name_column is not None, f"{level} 认不出对象名列"
+        assert id_column != name_column

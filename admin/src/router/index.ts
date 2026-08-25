@@ -17,6 +17,9 @@ const routes: RouteRecordRaw[] = [
   // 库存紧挨着导入：它也是一件「把另一个后台的数搬过来」的手工活，而且是同一个
   // 人在同一段时间里做的。
   { path: '/stock', name: 'stock', component: () => import('../pages/StockPage.vue') },
+  // 数据源紧挨着导入：它们是同一件事的两条路（问来的、传来的），而「今天要不要
+  // 手工导」的答案就在这一屏上。
+  { path: '/fetch', name: 'fetch', component: () => import('../pages/FetchPage.vue') },
   { path: '/alerts', name: 'alerts', component: () => import('../pages/AlertsPage.vue') },
   // 日报排在告警之后：运营的一天是「导入 → 看告警 → 出日报」。
   { path: '/reports', name: 'reports', component: () => import('../pages/ReportsPage.vue') },

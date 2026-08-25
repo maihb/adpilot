@@ -50,7 +50,7 @@ export function reason(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback
 }
 
-type Method = 'GET' | 'POST' | 'PATCH'
+type Method = 'GET' | 'POST' | 'PATCH' | 'PUT'
 
 export interface RequestOptions {
   method?: Method

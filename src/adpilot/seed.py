@@ -66,10 +66,12 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 import structlog
-from sqlalchemy import select
+from pydantic import SecretStr
+from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from adpilot.auth import crypto
 from adpilot.config import Settings, get_settings
 from adpilot.db.postgres import create_engine, create_session_factory, transaction
 from adpilot.logging import configure_logging
@@ -78,8 +80,10 @@ from adpilot.models.ad_account import AdAccount, Platform
 from adpilot.models.balance import Balance
 from adpilot.models.client import Client
 from adpilot.models.daily_metric import DailyMetric, MetricLevel
+from adpilot.models.fetch import PlatformCredential
 from adpilot.models.product import Product, StockSnapshot
 from adpilot.models.report import Report
+from adpilot.providers.fake_api import FakeFetchProvider
 from adpilot.rules import balance as balance_rules
 from adpilot.rules import stock as stock_rules
 from adpilot.services import action as action_service
@@ -831,6 +835,60 @@ async def _ensure_report(
     return True
 
 
+async def _ensure_demo_credential(
+    session: AsyncSession, settings: Settings
+) -> PlatformCredential | None:
+    """造一条**假的**平台凭据，让自动拉取那条链在没有真凭据时也能演示。
+
+    ### 为什么它值得存在
+
+    TikTok 的 API 权限要审核，几个工作日到数周。而自动拉取有七个环节（解密、调用、
+    落快照、排归一化、写日指标、写余额、失败告警）—— 等审核结果再来第一次验证
+    它们，等于把七个环节的 bug 攒到同一天暴露。
+
+    ### 三道防线，防的是同一件事：它被当成真的
+
+    1. `provider` 是 `fake_api`，而注册表在 `ENVIRONMENT=prod` 下**造不出它**；
+    2. seed 本身就拒绝在生产环境执行；
+    3. label 带「示例｜」前缀，和示例客户同一套约定。
+
+    没配 `CREDENTIALS_SECRET` 时**跳过而不是报错**：那时自动拉取本来就用不了，
+    而一个「灌不进示例数据」的空库对新来的人毫无用处。
+    """
+    existing = await session.scalar(
+        select(PlatformCredential).where(PlatformCredential.provider == FakeFetchProvider.name)
+    )
+    if existing is not None:
+        # ⚠️ **已经挂在某个账户上了就返回 None** —— 否则重复跑 seed 会每次多挂一个
+        # 账户，直到所有示例账户都在自动拉取。那违反「只添不改，重复跑安全」，而且
+        # 会让「哪些账户在自动拉」这个对比在示例数据里消失（实跑第二次时逮到的）。
+        attached = await session.scalar(
+            select(func.count())
+            .select_from(AdAccount)
+            .where(AdAccount.credential_id == existing.id)
+        )
+        return None if attached else existing
+
+    try:
+        access_token = crypto.encrypt(
+            settings.credentials_secret, SecretStr("demo-not-a-real-token")
+        )
+    except crypto.CryptoNotConfiguredError:
+        log.info("seed_skipped_demo_credential", reason="未配置 CREDENTIALS_SECRET")
+        return None
+
+    credential = PlatformCredential(
+        platform=Platform.TIKTOK,
+        provider=FakeFetchProvider.name,
+        label="示例｜脱机演示授权",
+        access_token=access_token,
+        external_account_ids=[],
+    )
+    session.add(credential)
+    await session.flush()
+    return credential
+
+
 async def seed(session: AsyncSession, settings: Settings) -> SeedSummary:
     """把 `_PLAN` 灌进库里。只添不改，重复跑安全。
 
@@ -838,6 +896,9 @@ async def seed(session: AsyncSession, settings: Settings) -> SeedSummary:
     塞进去）—— 走真链路才保证示例数据和真实行为不漂移。
     """
     summary = SeedSummary()
+    # 只挂在**第一个**示例账户上：一个账户就足够演示整条链，全挂上去会让「哪些
+    # 账户在自动拉」这件事在示例数据里失去对比。
+    demo_credential = await _ensure_demo_credential(session, settings)
 
     for client_plan in _PLAN:
         client, client_created = await _ensure_client(session, client_plan)
@@ -852,6 +913,15 @@ async def seed(session: AsyncSession, settings: Settings) -> SeedSummary:
 
         for account_plan in client_plan.accounts:
             account, account_created = await _ensure_account(session, account_plan, client.id)
+            if demo_credential is not None and account.credential_id is None:
+                account.credential_id = demo_credential.id
+                await session.flush()
+                log.info(
+                    "seed_attached_demo_credential",
+                    account_id=account.id,
+                    credential_id=demo_credential.id,
+                )
+                demo_credential = None
             inserted, skipped, balance_recorded = await _seed_account(
                 session, account_plan, account
             )

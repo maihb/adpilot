@@ -432,3 +432,33 @@ def _assert_demo_report(report: Report) -> None:
     assert report.llm_call_id is None
     # 发布校验之一：本期做了什么不能是空的
     assert report.actions_snapshot, "日报里没有操作记录，它本不该发得出去"
+
+
+@pytest.mark.integration
+async def test_running_seed_twice_attaches_the_demo_credential_only_once(
+    live_session: AsyncSession,
+    live_settings: Settings,
+) -> None:
+    """🔴 重复跑 seed，挂着假凭据的账户数不能变多。
+
+    **实跑第二次时逮到的**：第一版判据是「这个账户还没挂凭据就挂上」，于是每跑
+    一次 seed 就多一个账户进入自动拉取，直到全都在拉。它违反 seed 那条「只添不改，
+    重复跑安全」，而且会让「哪些账户在自动拉、哪些还是手工导」这个对比在示例数据
+    里彻底消失 —— 而这两件事都不会报错。
+
+    ⚠️ 这条要跑真库：判据本身是一次 `count(*)`，mock 掉就什么都没验。
+    """
+    settings = live_settings.model_copy(update={"credentials_secret": SecretStr("x" * 32)})
+
+    await seed.seed(live_session, settings)
+    first = await live_session.scalar(
+        select(func.count()).select_from(AdAccount).where(AdAccount.credential_id.is_not(None))
+    )
+
+    await seed.seed(live_session, settings)
+    second = await live_session.scalar(
+        select(func.count()).select_from(AdAccount).where(AdAccount.credential_id.is_not(None))
+    )
+
+    assert first == 1
+    assert second == first

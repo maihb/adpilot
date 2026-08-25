@@ -79,6 +79,18 @@ class AdAccount(Base, TimestampMixin):
 
     is_active: Mapped[bool] = mapped_column(Boolean(), server_default=true())
 
+    #: 挂哪个平台授权 → **可空就是「不自动拉取」**。
+    #:
+    #: 自动拉取刻意不另设一个 `auto_fetch` 布尔：两个开关（挂了凭据但关掉拉取、
+    #: 开了拉取却没挂凭据）会长出四种组合，其中两种是没有意义的状态，而没有意义
+    #: 的状态迟早会有人配出来。理由见 `models/fetch.py` 的 `PlatformCredential`。
+    #:
+    #: RESTRICT：还有账户挂着就不许删凭据 —— 同 `client_id` 那条，删除从来不是
+    #: 这个系统里的正常操作，停用走 `is_active`。
+    credential_id: Mapped[int | None] = mapped_column(
+        ForeignKey("platform_credentials.id", ondelete="RESTRICT"), index=True
+    )
+
     #: 要不要每天自动出一份日报（生成成 draft，**绝不自动发布**）。
     #:
     #: 🔴 **它是省钱的闸门，不是审美偏好。** 并不是每个账户都要日报（内部测试

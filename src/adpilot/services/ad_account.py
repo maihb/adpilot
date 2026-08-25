@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from adpilot.models.ad_account import DEFAULT_REPORT_DELAY_HOURS, AdAccount, Platform
 from adpilot.models.client import Client
+from adpilot.models.fetch import PlatformCredential
 from adpilot.services.exceptions import (
     ConflictError,
     NotFoundError,
@@ -192,3 +193,38 @@ async def _flush_or_conflict(
         await session.flush()
     except IntegrityError as exc:
         raise ConflictError(f"{platform.value} 上已存在这个账户 ID：{external_id}") from exc
+
+
+async def attach_credential(
+    session: AsyncSession,
+    account_id: int,
+    *,
+    credential_id: int | None,
+) -> AdAccount:
+    """把账户挂到某个平台凭据上；`None` 表示解绑。
+
+    🔴 **挂上就是开自动拉取，解绑就是关。** 不另设 `auto_fetch` 开关的理由写在
+    `models/ad_account.py` 的 `credential_id` 上。
+
+    平台对不上抛 `ReferenceNotFoundError`（→ 422）。这个校验必须在这里做：数据库
+    的外键只保证「那个凭据存在」，保证不了「它是同一个平台的」，而挂错的症状是
+    每次拉取都被平台拒绝 —— 那个报错完全不提你挂错了。
+    """
+    account = await get(session, account_id)
+
+    if credential_id is None:
+        account.credential_id = None
+        await session.flush()
+        return account
+
+    credential = await session.get(PlatformCredential, credential_id)
+    if credential is None:
+        raise ReferenceNotFoundError(f"平台凭据不存在：{credential_id}")
+    if credential.platform is not account.platform:
+        raise ReferenceNotFoundError(
+            f"平台对不上：账户是 {account.platform.value}，凭据是 {credential.platform.value}"
+        )
+
+    account.credential_id = credential_id
+    await session.flush()
+    return account

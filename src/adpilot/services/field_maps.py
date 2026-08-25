@@ -51,14 +51,17 @@ def find_column(row: Mapping[str, Any], candidates: Sequence[str]) -> str | None
 # 时是 ad。level 由导入时显式给定，不从内容推断（理由见 services/imports.py）。
 
 OBJECT_ID_COLUMNS: dict[MetricLevel, tuple[str, ...]] = {
-    MetricLevel.ACCOUNT: ("accountid", "adaccountid", "广告账户id", "账户id"),
+    # `advertiserid` 是 TikTok API 账户级的维度名（D19 实跑逮到的：少了它，
+    # 账户层的快照归一化时报「找不到对象 ID 列」）。**不会和 AD 层的 `adid`
+    # 撞**：前缀匹配下 "advertiserid" 不以 "adid" 开头。
+    MetricLevel.ACCOUNT: ("accountid", "adaccountid", "advertiserid", "广告账户id", "账户id"),
     MetricLevel.CAMPAIGN: ("campaignid", "广告系列id", "广告计划id"),
     MetricLevel.ADGROUP: ("adsetid", "adgroupid", "广告组id"),
     MetricLevel.AD: ("adid", "广告id", "创意id"),
 }
 
 OBJECT_NAME_COLUMNS: dict[MetricLevel, tuple[str, ...]] = {
-    MetricLevel.ACCOUNT: ("accountname", "广告账户名称", "账户名称"),
+    MetricLevel.ACCOUNT: ("accountname", "advertisername", "广告账户名称", "账户名称"),
     MetricLevel.CAMPAIGN: ("campaignname", "广告系列名称", "广告计划名称"),
     MetricLevel.ADGROUP: ("adsetname", "adgroupname", "广告组名称"),
     MetricLevel.AD: ("adname", "广告名称", "创意名称"),

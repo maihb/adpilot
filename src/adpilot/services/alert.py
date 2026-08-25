@@ -44,10 +44,12 @@ from adpilot.models.client import Client
 from adpilot.models.llm_call import LLMCall
 from adpilot.notifiers import webhook
 from adpilot.rules import anomaly as anomaly_rules
+from adpilot.rules import fetch as fetch_rules
 from adpilot.services import action as action_service
 from adpilot.services import ad_account as ad_account_service
 from adpilot.services import balance as balance_service
 from adpilot.services import daily_metric as daily_metric_service
+from adpilot.services import fetch as fetch_service
 from adpilot.services import llm as llm_service
 from adpilot.services import product as product_service
 from adpilot.services.exceptions import NotFoundError
@@ -60,6 +62,9 @@ BALANCE_SUBJECT = "balance"
 #: 库存告警每个商品一件事，`subject` 带上 SKU。没有它，同一个客户的两个断货商品
 #: 会互相顶掉 —— 部分唯一索引认的是 (客户, 种类, subject)。
 STOCK_SUBJECT_PREFIX = "stock:"
+
+#: 拉取停更每个账户只有一件事，subject 固定。
+FETCH_SUBJECT = "fetch"
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,7 +118,7 @@ async def sweep(session: AsyncSession, settings: Settings) -> SweepSummary:
     resolved = 0
 
     for account in accounts:
-        findings = await _findings_for(session, account)
+        findings = await _findings_for(session, account, settings=settings, now=now)
         account_opened, account_still, account_resolved = await _reconcile(
             session,
             client_id=account.client_id,
@@ -245,8 +250,21 @@ async def list_for_client(
     return rows.all(), total or 0
 
 
-async def _findings_for(session: AsyncSession, account: AdAccount) -> list[Finding]:
+async def _findings_for(
+    session: AsyncSession,
+    account: AdAccount,
+    *,
+    settings: Settings,
+    now: datetime,
+) -> list[Finding]:
     findings: list[Finding] = []
+
+    # 🔴 **停更这条排在最前面**，不只是顺序好看：它成立的时候，下面两条的结论
+    # 全都不可信 —— 拉取一停，花费就变成 0，于是余额告警安静下来、指标异动报出
+    # 一个「花费暴跌」。人先看到哪一条，决定他会不会往错误的方向查一整天。
+    fetch_finding = await _fetch_finding(session, account, settings=settings, now=now)
+    if fetch_finding is not None:
+        findings.append(fetch_finding)
 
     balance_finding = await _balance_finding(session, account)
     if balance_finding is not None:
@@ -254,6 +272,63 @@ async def _findings_for(session: AsyncSession, account: AdAccount) -> list[Findi
 
     findings.extend(await _anomaly_findings(session, account))
     return findings
+
+
+async def _fetch_finding(
+    session: AsyncSession,
+    account: AdAccount,
+    *,
+    settings: Settings,
+    now: datetime,
+) -> Finding | None:
+    """自动拉取是不是停了。判定在 `rules/fetch.py`，这里只查库和拼人话。
+
+    **两种情况直接跳过，它们都不是故障**：
+
+    * 账户没挂凭据 —— 那是 CSV 导入的账户，「没在自动拉」是它的正常形态；
+    * 一条 `fetch_states` 都没有 —— 从来没拉过。刚挂上凭据、还没到第一个排期点
+      的账户不该因此报警。
+    """
+    if account.credential_id is None:
+        return None
+
+    state = await fetch_service.state_for(session, account.id)
+    if state is None:
+        return None
+
+    health = fetch_rules.evaluate(
+        last_success_at=state.last_success_at,
+        consecutive_failures=state.consecutive_failures,
+        now=now,
+        stale_hours=settings.fetch_stale_hours,
+    )
+    if not health.is_alerting:
+        return None
+
+    hours = health.hours_since_success
+    since = f"已经 {hours} 小时没拉到数" if hours is not None else "从来没成功拉到过数"
+    if health.trouble is fetch_rules.FetchTrouble.FAILING:
+        # 把 `last_error` 放进人话里 —— 推送到群里的只有 message 这一行，而这条
+        # 告警要人做的第一件事恰恰取决于错在哪（重新授权？还是等平台恢复？）。
+        message = f"自动拉取连续失败 {state.consecutive_failures} 次，{since}：{state.last_error}"
+    else:
+        message = f"自动拉取{since}，任务可能没在跑（检查 beat 与 worker）"
+
+    return Finding(
+        kind=AlertKind.FETCH_FAILED,
+        subject=FETCH_SUBJECT,
+        message=message,
+        detail={
+            "trouble": health.trouble.value if health.trouble else None,
+            "hours_since_success": hours,
+            "consecutive_failures": state.consecutive_failures,
+            "last_error": state.last_error,
+            "last_success_at": (
+                state.last_success_at.isoformat() if state.last_success_at else None
+            ),
+            "stale_hours": settings.fetch_stale_hours,
+        },
+    )
 
 
 async def _balance_finding(session: AsyncSession, account: AdAccount) -> Finding | None:

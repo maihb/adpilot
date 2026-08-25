@@ -23,6 +23,9 @@ export type Product = Schemas['ProductItem']
 export type StockRunway = Schemas['StockRunwayResponse']
 export type StockImportResult = Schemas['StockImportResponse']
 export type ReportNarrative = Schemas['ReportNarrative']
+export type Credential = Schemas['CredentialRead']
+export type FetchResult = Schemas['FetchResponse']
+export type FetchState = Schemas['FetchStateRead']
 
 // —— 认证 ————————————————————————————————————————————————
 
@@ -260,4 +263,50 @@ export function importStock(clientId: number, form: FormData): Promise<StockImpo
 
 export function listStockRunway(clientId: number): Promise<Schemas['StockRunwayListResponse']> {
   return request<Schemas['StockRunwayListResponse']>(`/clients/${clientId}/stock-runway`)
+}
+
+
+// —— 自动拉取与平台凭据 ————————————————————————————————————
+
+/** 拿一个「去平台点同意」的地址。**这一步不写任何东西**，所以重复点是安全的。 */
+export function createAuthorizeUrl(label: string): Promise<Schemas['AuthorizeUrlResponse']> {
+  return request<Schemas['AuthorizeUrlResponse']>('/credentials/authorize-url', {
+    method: 'POST',
+    body: { label },
+  })
+}
+
+export function listCredentials(): Promise<Credential[]> {
+  return request<Credential[]>('/credentials')
+}
+
+export function deactivateCredential(id: number): Promise<Credential> {
+  return request<Credential>(`/credentials/${id}/deactivate`, { method: 'POST' })
+}
+
+/** 挂上凭据 = 开自动拉取，传 `null` = 关掉。没有第二个开关。 */
+export function attachAccountCredential(
+  accountId: number,
+  credentialId: number | null,
+): Promise<AdAccount> {
+  return request<AdAccount>(`/ad-accounts/${accountId}/credential`, {
+    method: 'PUT',
+    body: { credential_id: credentialId },
+  })
+}
+
+/** 立刻拉一次。不传日期就是滚动窗口（后端配置，默认最近 3 天）。 */
+export function fetchAccountData(
+  accountId: number,
+  range?: { since?: string; until?: string },
+): Promise<FetchResult> {
+  return request<FetchResult>(`/ad-accounts/${accountId}/fetch`, {
+    method: 'POST',
+    body: { since: range?.since || null, until: range?.until || null },
+  })
+}
+
+/** 上次拉取的结局。**从来没拉过是 404**，调用方要把它当成「没接自动拉取」而不是错误。 */
+export function getAccountFetchState(accountId: number): Promise<FetchState> {
+  return request<FetchState>(`/ad-accounts/${accountId}/fetch-state`)
 }

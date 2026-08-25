@@ -35,6 +35,7 @@
 | **改日报 / 生成、修订、发布**（快照固定与两条发不出去的校验） | [`docs/business/reports.md`](docs/business/reports.md) |
 | **登记投放操作 / 日报「本期做了什么」的来源** | [`docs/business/actions.md`](docs/business/actions.md) |
 | **调 LLM / 加提示词 / 查调用成本**（三条硬边界各被什么拦着） | [`docs/business/llm.md`](docs/business/llm.md) |
+| **接平台 API / 改自动拉取 / 平台凭据怎么存**（拉不到数为什么比拉错数更危险） | [`docs/business/credentials.md`](docs/business/credentials.md) + [设计](docs/design/2026-08-25-ads-api-fetch.md) |
 | **加一个后台任务**（重试与死信怎么分流、worker 里的两个致命坑） | [`docs/business/tasks.md`](docs/business/tasks.md) |
 | **加一条规则或告警**（状态机怎么去重、通知怎么不重复打扰） | [`docs/business/alerts.md`](docs/business/alerts.md) |
 | **改库存 / 断货预警**（日均销量的两个来源、告警为什么是客户级的） | [`docs/business/stock.md`](docs/business/stock.md) |

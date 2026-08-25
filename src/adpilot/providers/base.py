@@ -8,7 +8,8 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
+from decimal import Decimal
 from typing import Any, Protocol
 
 
@@ -75,3 +76,104 @@ class ReportProvider(Protocol):
     name: str
 
     def parse(self, content: bytes) -> ParseResult: ...
+
+
+class FetchError(Exception):
+    """从平台 API 拉数据失败。
+
+    🔴 **`retryable` 是这个类存在的全部理由。** API 世界里的失败分两种，而把它们
+    混成一种会让系统在最坏的情况下最安静：
+
+    * **瞬时**（限流、502、连接超时）→ 退避重试，多半自己会好；
+    * **确定性**（token 过期或被撤销、advertiser_id 不对、权限不足）→ 立刻停止
+      重试并让人知道。重试一个已经失效的 token，五次退避之后任务安静地失败，而
+      任务结果一天后就过期了 —— 第二天没人发现，第三天日报里的「花费 0」看起来
+      还是很正常。
+
+    **判定是平台知识，归各 provider 自己做**（错误码表长在平台那边）。上层只认
+    这个布尔值：`tasks/` 据它决定重试还是直接进死信队列。
+
+    ⚠️ **拿不准的时候填 `False`。** 不可重试的那条路会开告警、会有人看见；可
+    重试的那条路会安静地自愈或安静地失败。误判成「不可重试」的代价是一条多余的
+    告警，反过来的代价是数据静默停更好几天。
+    """
+
+    def __init__(self, message: str, *, retryable: bool) -> None:
+        super().__init__(message)
+        self.message = message
+        self.retryable = retryable
+
+
+@dataclass(frozen=True, slots=True)
+class AccountBalance:
+    """账户在某一刻的可用余额。
+
+    **是时点量不是日量**，所以带的是 `captured_at` 而不是 `stat_date` ——
+    同一天充值前后是两个完全不同的数（`models/balance.py` 讲了为什么这张表
+    和日指标刻意不同构）。
+
+    ⚠️ `captured_at` 是**平台口径的时刻**，拿不到就填拉取时刻。两者的差别在
+    「刚充完值那几分钟」会显现，所以由 provider 决定填什么、并在落库时把来源
+    写进 `note`，而不是让上层去猜。
+    """
+
+    available: Decimal
+    currency: str
+    captured_at: datetime
+
+
+class FetchProvider(Protocol):
+    """从平台 API 拉数据。**与 `ReportProvider` 是并列的两种形态，不是它的子类。**
+
+    ## 为什么不合成一个 Protocol
+
+    同步/异步这条线跨不过去：`parse` 必须留在 `asyncio.to_thread` 里（几千行 CSV
+    在事件循环里解析会卡住**整个进程**的所有请求），而 `fetch` 是纯网络等待，丢
+    进线程池只是白占一个线程。硬凑成一个方法的下场是每个调用点都要先判断「这个
+    provider 是哪一种」—— 那正是 Protocol 想消掉的东西。
+
+    **共用的是产物**（`ParseResult` / `RawRows`），于是落快照、归一化、重跑、审计
+    全是同一套代码。这就是本模块开头那句「要统一的是产物，不是入口」。
+
+    ## `level` 为什么是 `str` 而不是 `MetricLevel`
+
+    本模块不 import 任何 adpilot 内部模块（见模块 docstring），而 `MetricLevel`
+    在 `models` 里。所以这里收字符串（`"campaign"` / `"ad"`），由 `services/` 传
+    `level.value` 进来；把它翻译成平台方言（TikTok 的 `AUCTION_CAMPAIGN`、维度
+    `campaign_id`）是各 provider 自己的事 —— 那本来就是平台特有的知识。
+
+    ## 拉回来的东西一个字段都不许改名
+
+    和文件导入同一条规矩：`RawRows.rows` 里的键就是平台给的键。API 的响应是嵌套
+    的（dimensions / metrics 两层），provider 可以把它**摊平成一层**，但不能改名
+    —— 摊平只是去掉一层容器，改名会把当时的映射规则永久烧进快照，重跑也救不回来。
+    """
+
+    #: 落进 `raw_reports.provider` 的值。与文件型 provider 共用一个命名空间，
+    #: 所以 TikTok 的 API provider 和将来可能出现的 TikTok CSV provider 必须
+    #: 是两个名字 —— 它们的字段形状不一样，归一化要靠这个名字知道该怎么读。
+    name: str
+
+    async def fetch(
+        self,
+        *,
+        external_id: str,
+        level: str,
+        since: date,
+        until: date,
+    ) -> ParseResult:
+        """拉 `[since, until]`（**两端都含**）区间内的日指标。
+
+        区间是闭的，因为平台的 `start_date` / `end_date` 参数就是闭区间 —— 在这里
+        改成半开会让每个 provider 都得做一次 ±1 天的换算，而那种错不会报错，只会
+        让每次拉取都少一天。
+        """
+        ...
+
+    async def fetch_balance(self, *, external_id: str) -> AccountBalance:
+        """拉当前可用余额。
+
+        与 `fetch` 分开是因为它们的产物、频率和用途都不同：日指标是历史事实、
+        可以补拉，余额是此刻的状态、补拉没有意义（过去某一刻的余额平台不提供）。
+        """
+        ...

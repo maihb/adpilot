@@ -34,9 +34,10 @@
 | [内部操作台](admin.md) | — | 运营的七屏、写操作的三级分类、邀请码只显示一次、导入的两段 | `admin/src/` | ✅ D12 五屏 + D14 日报屏（发布要二次确认）+ D16 库存屏 |
 | [客户端界面](client-app.md) | — | 客户在手机上看到的五屏、以及「显示错了不会报错」的四条口径规则 | `client/src/` | ✅ D10–D11 四屏 + D14 日报屏：H5 已跑通；微信小程序端只验到编译通过 |
 | [客户与账户](clients.md) | `clients` | 客户、广告账户（平台/币种/**时区**）、账户与客户的归属 | `client.py` `ad_account.py`（model / schema / service / api 四层同名） | ✅ D3：建、查、改与分页已落地，无删除 |
-| [数据接入](imports.md) | `imports` | `ReportProvider` 适配器注册表、文件导入、原始快照落盘 | `providers/` `services/imports.py` | ✅ D3：CSV 导入与 append-only 落盘已通，Excel 与拉取调度未做 |
+| [数据接入](imports.md) | `imports` | `ReportProvider` 适配器注册表、文件导入、原始快照落盘 | `providers/` `services/imports.py` | ✅ D3：CSV 导入与 append-only 落盘已通，Excel 未做；拉取调度见 [credentials](credentials.md) |
+| [自动拉取与凭据](credentials.md) | `credentials` | 平台 OAuth 授权、token 加密落库、定时拉日指标与余额、**拉不到数的可见性** | `providers/tiktok.py` `auth/crypto.py` `services/fetch.py` `rules/fetch.py` `tasks/fetch.py` | 🚧 D19：TikTok 一条链已落地（凭据待平台审核，可用 `fake_api` 脱机验）；投放状态与 Meta 未做 |
 | [日指标](metrics.md) | `metrics` | 平台字段 → 统一口径、唯一键 upsert、按天查询与派生指标 | `services/field_maps.py` `services/normalize.py` `services/daily_metric.py` | ✅ D3–D5：归一化与按天查询已通；聚合与环比未做 |
-| [异步任务](tasks.md) | `tasks` | Celery + RabbitMQ、重试与死信队列、任务状态查询、定时排期 | `db/broker.py` `tasks/` `services/task.py` | ✅ D6 归一化异步化；D8 告警巡检、D18 定时日报进 `beat_schedule`（**要另起一个 beat 进程**） |
+| [异步任务](tasks.md) | `tasks` | Celery + RabbitMQ、重试与死信队列、任务状态查询、定时排期 | `db/broker.py` `tasks/` `services/task.py` | ✅ D6 归一化异步化；D8 告警巡检、D18 定时日报、D19 自动拉取进 `beat_schedule`（**要另起一个 beat 进程**） |
 | [余额与账户](balances.md) | `balances` | 余额快照录入、可撑天数 | `rules/balance.py` `services/balance.py` | ✅ D7 |
 | [库存与断货](stock.md) | `products` | 库存表导入、可撑天数、**日均销量的两个来源**。告警是**客户级**的 | `rules/stock.py` `providers/stock_csv.py` `services/product.py` | ✅ D16：整条链已通；商品与广告系列的映射明确不做 |
 | [告警与巡检](alerts.md) | `alerts` | 状态机去重、定时巡检、指标异动、webhook 推送 | `rules/anomaly.py` `services/alert.py` `tasks/alerts.py` `notifiers/` | ✅ D8：巡检自动跑、同一件事只报一次；D16 加了客户级那一层 |

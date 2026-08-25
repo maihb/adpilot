@@ -18,6 +18,7 @@ from adpilot.models.alert import Alert, AlertKind, AlertStatus
 from adpilot.models.balance import Balance
 from adpilot.models.client import Client
 from adpilot.models.daily_metric import DailyMetric, MetricLevel
+from adpilot.models.fetch import FetchState, PlatformCredential
 from adpilot.models.invite import Invite
 from adpilot.models.llm_call import LLMCall
 from adpilot.models.product import Product, StockSnapshot
@@ -34,10 +35,12 @@ __all__ = [
     "Balance",
     "Client",
     "DailyMetric",
+    "FetchState",
     "Invite",
     "LLMCall",
     "MetricLevel",
     "Platform",
+    "PlatformCredential",
     "Product",
     "Report",
     "ReportStatus",

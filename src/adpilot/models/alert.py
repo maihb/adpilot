@@ -28,6 +28,15 @@ class AlertKind(StrEnum):
     #: NULL 的告警，理由见 `Alert` 的类 docstring。
     STOCK_LOW = "stock_low"
 
+    #: 自动拉取失败，或者太久没拉到数了。
+    #:
+    #: 🔴 **这一条和其它三条的性质不同**：那三条说的是「数据显示出了问题」，
+    #: 这一条说的是「数据本身可能是假的」。拉取一停，看板上的花费就变成 0，
+    #: 而 0 花费和「昨天没投放」在每一屏上都长得一模一样 —— 于是余额告警安静
+    #: 下来、日报照常生成、所有数字看起来都很正常。见
+    #: [自动拉取设计](../../../docs/design/2026-08-25-ads-api-fetch.md)第三节。
+    FETCH_FAILED = "fetch_failed"
+
 
 class AlertStatus(StrEnum):
     OPEN = "open"

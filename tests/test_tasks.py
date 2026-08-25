@@ -33,9 +33,11 @@ from adpilot.db import broker
 from adpilot.db.broker import (
     DEAD_LETTER_EXCHANGE,
     DEAD_LETTER_QUEUE,
+    FETCH_SCHEDULE_MINUTE,
     MAIN_QUEUE,
     REPORTS_SCHEDULE_MINUTE,
     SWEEP_SCHEDULE_MINUTE,
+    TASK_FETCH_DUE_ACCOUNTS,
     TASK_GENERATE_DUE_REPORTS,
     TASK_NORMALIZE_ACCOUNT,
     TASK_SWEEP_ALERTS,
@@ -177,13 +179,17 @@ def test_beat_has_a_way_to_be_started(path: str) -> None:
     assert "beat" in content
 
 
-@pytest.mark.parametrize("task_name", [TASK_SWEEP_ALERTS, TASK_GENERATE_DUE_REPORTS])
+@pytest.mark.parametrize(
+    "task_name",
+    [TASK_SWEEP_ALERTS, TASK_GENERATE_DUE_REPORTS, TASK_FETCH_DUE_ACCOUNTS],
+)
 def test_scheduled_tasks_go_to_the_business_queue(task_name: str) -> None:
-    """两个排期任务都要真的在 `beat_schedule` 里，且投到业务队列。
+    """三个排期任务都要真的在 `beat_schedule` 里，且投到业务队列。
 
     投错队列的话消息会进默认的 `celery` 队列，而 worker 只消费 `adpilot` ——
     消息进去了，没人取。症状按任务不同：巡检那条是「一条告警都不来」，日报那条
-    是「早上打开后台一份草稿都没有」，两者都跟「最近没什么事」长得一样。
+    是「早上打开后台一份草稿都没有」，拉取那条是「看板上昨天花了 0 元」—— 三者
+    都跟「最近没什么事」长得一样，而最后那个还会让另外两条一起给出错的结论。
     """
     schedule = celery_app.conf.beat_schedule
     entries = [entry for entry in schedule.values() if entry["task"] == task_name]
@@ -207,6 +213,18 @@ def test_the_two_schedules_do_not_collide() -> None:
     assert SWEEP_SCHEDULE_MINUTE != REPORTS_SCHEDULE_MINUTE, (  # type: ignore[comparison-overlap]
         "巡检和定时日报排在了同一分钟 —— 日报要引用巡检产出的告警，让巡检先跑"
     )
+    # D19 起是**三个**任务，而这条链是有方向的：
+    #
+    #     拉取 ──▶ 巡检（用刚拉到的数判告警）──▶ 日报（引用刚开的告警）
+    #
+    # 任意两个撞在同一分钟，中间那一环就可能读到上一环还没写完的东西 —— 而症状
+    # 同样是「有几天的输出少了一段」，不报错。
+    assert FETCH_SCHEDULE_MINUTE != SWEEP_SCHEDULE_MINUTE, (  # type: ignore[comparison-overlap]
+        "自动拉取和告警巡检排在了同一分钟 —— 巡检要用刚拉到的数，让拉取先跑"
+    )
+    assert FETCH_SCHEDULE_MINUTE != REPORTS_SCHEDULE_MINUTE, (  # type: ignore[comparison-overlap]
+        "自动拉取和定时日报排在了同一分钟 —— 日报要用刚拉到的数，让拉取先跑"
+    )
 
 
 def test_every_task_name_is_registered_by_the_modules_the_worker_loads() -> None:
@@ -225,6 +243,7 @@ def test_every_task_name_is_registered_by_the_modules_the_worker_loads() -> None
     assert TASK_NORMALIZE_ACCOUNT in celery_app.tasks
     assert TASK_SWEEP_ALERTS in celery_app.tasks
     assert TASK_GENERATE_DUE_REPORTS in celery_app.tasks
+    assert TASK_FETCH_DUE_ACCOUNTS in celery_app.tasks
     assert normalize_task.normalize_account.name == TASK_NORMALIZE_ACCOUNT
 
 
