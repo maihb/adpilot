@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 
 import structlog
 from fastapi import APIRouter, HTTPException, status
@@ -15,6 +16,7 @@ from adpilot.api.deps import (
     ClientContextDep,
     ClientScopeDep,
     OperatorContextDep,
+    RedisDep,
     SessionDep,
     SettingsDep,
 )
@@ -22,12 +24,14 @@ from adpilot.api.errors import responses
 from adpilot.auth.password import verify_operator
 from adpilot.auth.token import Scope, issue, renew
 from adpilot.schemas.auth import (
+    CaptchaResponse,
     ClientTokenResponse,
     InviteRedeemRequest,
     OperatorLoginRequest,
     TokenResponse,
 )
 from adpilot.services import invite as invite_service
+from adpilot.services import login_guard
 
 router = APIRouter(tags=["auth"])
 log = structlog.get_logger(__name__)
@@ -39,11 +43,37 @@ log = structlog.get_logger(__name__)
     operation_id="login",
     responses=responses(status.HTTP_401_UNAUTHORIZED, status.HTTP_503_SERVICE_UNAVAILABLE),
 )
-async def login(request: OperatorLoginRequest, settings: SettingsDep) -> TokenResponse:
+async def login(
+    request: OperatorLoginRequest, settings: SettingsDep, redis: RedisDep
+) -> TokenResponse:
     """运营登录，换一个 8 小时的 token。
 
-    **这是全系统仅有的两个免认证接口之一**（另一个是用邀请码换客户端 token）。
+    **这是全系统仅有的两个免认证接口之一**（另一个是用邀请码换客户端 token），
+    而公网那套实例摘掉 nginx basic auth 之后，它是唯一的防线 —— 所以连续失败两次
+    之后要带验证码，见 [登录验证码](../../../docs/design/2026-08-25-login-captcha.md)。
     """
+    # 🔴🔴 **验证码必须验在 argon2 之前，这个顺序就是它的全部意义。**
+    #
+    # 反过来写（先验密码、错了再看验证码）不会有任何测试变红，但验证码就白加了：
+    # 攻击者拿一个空的 captcha_answer 照样能驱动服务端做无限次 argon2，只是拿不到
+    # 成功那次的响应而已 —— 爆破速率一点没降。这与 auth/token.py 里「验签必须排在
+    # 解析和过期判定之前」是同一类要求：错了不报错，只是悄悄失效。
+    if await login_guard.captcha_required(redis, username=request.username):
+        passed = await login_guard.consume_captcha(
+            redis,
+            captcha_id=request.captcha_id or "",
+            answer=request.captcha_answer or "",
+        )
+        if not passed:
+            log.warning("operator_login_captcha_failed", username=request.username)
+            # 计数照样 +1：不然「验证码随便填」就成了一条不涨计数的免费重试通道。
+            await login_guard.record_failure(redis, username=request.username)
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="验证码不对或已过期",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
     # 🔴 argon2 是 CPU 密集的（几十毫秒，故意的）。直接在这个 async 函数里调会
     # 卡住整个事件循环 —— 症状是**全局变慢**，不是登录变慢，而那种慢查起来很贵。
     # 见 conventions.md 的异步一节。
@@ -57,12 +87,14 @@ async def login(request: OperatorLoginRequest, settings: SettingsDep) -> TokenRe
     if not ok:
         # 用户名错和密码错**回同一句话**：区分等于确认「这个用户名是存在的」。
         log.warning("operator_login_failed", username=request.username)
+        await login_guard.record_failure(redis, username=request.username)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="用户名或密码不对",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
+    await login_guard.clear_failures(redis, username=request.username)
     token, expires_at = issue(
         settings.auth_secret,
         scope=Scope.OPERATOR,
@@ -70,6 +102,33 @@ async def login(request: OperatorLoginRequest, settings: SettingsDep) -> TokenRe
     )
     log.info("operator_login_succeeded", username=request.username)
     return TokenResponse(token=token, expires_at=expires_at)
+
+
+@router.get(
+    "/auth/captcha",
+    response_model=CaptchaResponse,
+    operation_id="getLoginCaptcha",
+    responses=responses(status.HTTP_503_SERVICE_UNAVAILABLE),
+)
+async def get_login_captcha(username: str, redis: RedisDep) -> CaptchaResponse:
+    """这个账号现在要不要验证码；要的话顺带出一张。
+
+    **这是第三个免认证接口**（`tests/test_auth_guard.py` 的豁免清单里有它）——
+    它必须免认证，因为调用它的人正是还没登录的那个。
+
+    泄露的信息只有「某个用户名最近连续失败到阈值没有」。运营账号从环境变量来、
+    全系统只有一个，这条信息不构成用户名枚举。
+    """
+    if not await login_guard.captcha_required(redis, username=username):
+        return CaptchaResponse(required=False)
+
+    captcha_id, svg = await login_guard.issue_captcha(redis)
+    encoded = base64.b64encode(svg.encode("utf-8")).decode("ascii")
+    return CaptchaResponse(
+        required=True,
+        captcha_id=captcha_id,
+        image=f"data:image/svg+xml;base64,{encoded}",
+    )
 
 
 @router.post(

@@ -60,9 +60,37 @@ export interface paths {
          * Login
          * @description 运营登录，换一个 8 小时的 token。
          *
-         *     **这是全系统仅有的两个免认证接口之一**（另一个是用邀请码换客户端 token）。
+         *     **这是全系统仅有的两个免认证接口之一**（另一个是用邀请码换客户端 token），
+         *     而公网那套实例摘掉 nginx basic auth 之后，它是唯一的防线 —— 所以连续失败两次
+         *     之后要带验证码，见 [登录验证码](../../../docs/design/2026-08-25-login-captcha.md)。
          */
         post: operations["login"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/auth/captcha": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Login Captcha
+         * @description 这个账号现在要不要验证码；要的话顺带出一张。
+         *
+         *     **这是第三个免认证接口**（`tests/test_auth_guard.py` 的豁免清单里有它）——
+         *     它必须免认证，因为调用它的人正是还没登录的那个。
+         *
+         *     泄露的信息只有「某个用户名最近连续失败到阈值没有」。运营账号从环境变量来、
+         *     全系统只有一个，这条信息不构成用户名枚举。
+         */
+        get: operations["getLoginCaptcha"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1345,6 +1373,25 @@ export interface components {
             note?: string | null;
         };
         /**
+         * CaptchaResponse
+         * @description 这个账号现在要不要验证码；要的话顺带把题给了。
+         *
+         *     **合成一个接口而不是拆成「查状态」+「取图」**：拆开的话前端得连发两次，而
+         *     第二次的结果会让第一次的答案过期（验证码用一次即删）—— 那种时序 bug 只在
+         *     网络慢的时候出现。
+         *
+         *     不需要验证码时 `captcha_id` 和 `image` 都是 `None`，**此时不会生成任何东西**，
+         *     也就不会往 Redis 里塞一张没人会用的答案。
+         */
+        CaptchaResponse: {
+            /** Required */
+            required: boolean;
+            /** Captcha Id */
+            captcha_id?: string | null;
+            /** Image */
+            image?: string | null;
+        };
+        /**
          * ClientCreateRequest
          * @description 建一个客户。
          *
@@ -1669,12 +1716,20 @@ export interface components {
         /**
          * OperatorLoginRequest
          * @description 运营登录。账号从环境变量来，不建用户表（设计文档 2026-08-21 第五节）。
+         *
+         *     验证码那两个字段**平时是空的** —— 只有连续失败到阈值之后才需要带，前端靠
+         *     `GET /api/auth/captcha` 知道该不该显示那个框
+         *     （[登录验证码](../../../docs/design/2026-08-25-login-captcha.md)）。
          */
         OperatorLoginRequest: {
             /** Username */
             username: string;
             /** Password */
             password: string;
+            /** Captcha Id */
+            captcha_id?: string | null;
+            /** Captcha Answer */
+            captcha_answer?: string | null;
         };
         /**
          * Platform
@@ -2337,6 +2392,46 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description 服务端缺少必要配置（认证、LLM 等） */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    getLoginCaptcha: {
+        parameters: {
+            query: {
+                username: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CaptchaResponse"];
                 };
             };
             /** @description Validation Error */

@@ -26,10 +26,28 @@ export type ReportNarrative = Schemas['ReportNarrative']
 
 // —— 认证 ————————————————————————————————————————————————
 
-export function login(username: string, password: string): Promise<Schemas['TokenResponse']> {
+export function login(
+  username: string,
+  password: string,
+  captcha?: { id: string; answer: string },
+): Promise<Schemas['TokenResponse']> {
   return request<Schemas['TokenResponse']>('/auth/login', {
     method: 'POST',
-    body: { username, password },
+    body: {
+      username,
+      password,
+      captcha_id: captcha?.id,
+      captcha_answer: captcha?.answer,
+    },
+    auth: false,
+  })
+}
+
+/** 这个账号现在要不要验证码；要的话响应里直接带着题
+ *  （docs/design/2026-08-25-login-captcha.md）。 */
+export function getLoginCaptcha(username: string): Promise<Schemas['CaptchaResponse']> {
+  return request<Schemas['CaptchaResponse']>('/auth/captcha', {
+    query: { username },
     auth: false,
   })
 }

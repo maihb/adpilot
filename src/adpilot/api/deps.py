@@ -19,6 +19,7 @@ from typing import Annotated
 from celery import Celery
 from fastapi import Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from adpilot.auth.token import InvalidTokenError, Scope, TokenPayload, verify
@@ -58,6 +59,16 @@ def get_mongo(resources: Annotated[Resources, Depends(get_resources)]) -> MongoD
     return resources.mongo_db
 
 
+def get_redis(resources: Annotated[Resources, Depends(get_resources)]) -> Redis:
+    """Redis 客户端。
+
+    在此之前它只躺在 `resources.py` 里没有任何路由用过 —— 登录验证码是第一个
+    （`services/login_guard.py`）。**调用方要自己容忍它连不上**：这个系统里
+    Redis 存的都是过程状态，不是丢不得的业务事实。
+    """
+    return resources.redis
+
+
 def get_celery(resources: Annotated[Resources, Depends(get_resources)]) -> Celery:
     """任务队列的**生产者**句柄。
 
@@ -71,6 +82,7 @@ ResourcesDep = Annotated[Resources, Depends(get_resources)]
 SettingsDep = Annotated[Settings, Depends(get_settings)]
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 MongoDep = Annotated[MongoDatabase, Depends(get_mongo)]
+RedisDep = Annotated[Redis, Depends(get_redis)]
 CeleryDep = Annotated[Celery, Depends(get_celery)]
 
 

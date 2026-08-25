@@ -33,6 +33,10 @@ PUBLIC_OPERATIONS = frozenset(
         # 换 token 的两个入口自己不能要 token。
         "post /api/auth/login",
         "post /api/auth/redeem",
+        # 登录验证码：调它的人正是还没登录的那个，所以只能免认证。它泄露的信息
+        # 只有「某个用户名最近连续失败到阈值没有」，而运营账号全系统只有一个，
+        # 构不成用户名枚举（docs/design/2026-08-25-login-captcha.md）。
+        "get /api/auth/captcha",
     }
 )
 

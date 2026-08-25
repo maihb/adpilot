@@ -12,10 +12,34 @@ PASSWORD_MAX_LENGTH = 1024
 
 
 class OperatorLoginRequest(BaseModel):
-    """运营登录。账号从环境变量来，不建用户表（设计文档 2026-08-21 第五节）。"""
+    """运营登录。账号从环境变量来，不建用户表（设计文档 2026-08-21 第五节）。
+
+    验证码那两个字段**平时是空的** —— 只有连续失败到阈值之后才需要带，前端靠
+    `GET /api/auth/captcha` 知道该不该显示那个框
+    （[登录验证码](../../../docs/design/2026-08-25-login-captcha.md)）。
+    """
 
     username: str = Field(min_length=1, max_length=128)
     password: str = Field(min_length=1, max_length=PASSWORD_MAX_LENGTH)
+    captcha_id: str | None = Field(default=None, max_length=128)
+    captcha_answer: str | None = Field(default=None, max_length=16)
+
+
+class CaptchaResponse(BaseModel):
+    """这个账号现在要不要验证码；要的话顺带把题给了。
+
+    **合成一个接口而不是拆成「查状态」+「取图」**：拆开的话前端得连发两次，而
+    第二次的结果会让第一次的答案过期（验证码用一次即删）—— 那种时序 bug 只在
+    网络慢的时候出现。
+
+    不需要验证码时 `captcha_id` 和 `image` 都是 `None`，**此时不会生成任何东西**，
+    也就不会往 Redis 里塞一张没人会用的答案。
+    """
+
+    required: bool
+    captcha_id: str | None = None
+    #: `data:image/svg+xml;base64,...`，前端直接塞进 `<img src>`。
+    image: str | None = None
 
 
 class TokenResponse(BaseModel):
