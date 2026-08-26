@@ -50,6 +50,25 @@ x-app-env: &app-env
   # 留空 = 不估成本，llm_calls.estimated_cost 记 NULL（「不知道」不是「免费」）。
   LLM_INPUT_COST_PER_MTOK: ${LLM_INPUT_COST_PER_MTOK:-0}
   LLM_OUTPUT_COST_PER_MTOK: ${LLM_OUTPUT_COST_PER_MTOK:-0}
+  # 平台凭据与自动拉取（D19）。全部 `:-`：**没配平台应用是正常状态** —— 那时
+  # 走 fake_api provider 脱机跑，`Settings.tiktok_is_configured` 照实说「没配」。
+  # 用 `:?` 会让公开仓库的 clone 者第一步就卡在一个他根本申请不到的凭据上。
+  #
+  # 🔴 **这六项 2026-08-26 才补进来 —— D19 当时只加了 config.py 的字段和
+  # .env.example 的说明，漏了这里。** 后果是填满 .env、重启容器，值也进不了
+  # 容器：所有字段都有空默认值，于是不报错、不告警，只是 TikTok 那条链路
+  # 静默地当作「没配置」。加字段时这三处要一起改。
+  CREDENTIALS_SECRET: ${CREDENTIALS_SECRET:-}
+  TIKTOK_APP_ID: ${TIKTOK_APP_ID:-}
+  TIKTOK_APP_SECRET: ${TIKTOK_APP_SECRET:-}
+  # 空 = 生产；填了就是沙盒（providers/tiktok.py 的 DEFAULT_BASE_URL 是生产地址）。
+  TIKTOK_API_BASE_URL: ${TIKTOK_API_BASE_URL:-}
+  # 收入类指标名，逗号分隔。**请求一个不存在的 metric 是整个请求 400**（不是那
+  # 一列返回空），所以实测确认之前宁可空着。
+  TIKTOK_EXTRA_METRICS: ${TIKTOK_EXTRA_METRICS:-}
+  # OAuth 回调的外部基地址，必须和平台后台登记的 redirect URL 拼得上 —— 差一个
+  # 字符平台就拒绝跳转，而报错只发生在平台那边，我们这里一行日志都没有。
+  OAUTH_REDIRECT_BASE_URL: ${OAUTH_REDIRECT_BASE_URL:-}
 
 x-backends: &backends
   postgres:
